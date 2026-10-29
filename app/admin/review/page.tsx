@@ -129,14 +129,14 @@ function Detail({ p, onSave }: { p: Parcel; onSave: (d: ReviewDecision, note: st
           </div>
 
           <div style={{ position: "relative", height: 230, borderRadius: 10, overflow: "hidden", background: "#e9edf0" }}>
-            <iframe title={`Map of ${p.address}`} src={`https://maps.google.com/maps?q=${p.lat},${p.lng}&z=14&output=embed`} style={{ border: 0, width: "100%", height: "100%" }} loading="lazy" />
-            <div className="small" style={{ position: "absolute", right: 12, top: 12, background: far ? "var(--red)" : "var(--green)", color: "#fff", borderRadius: 99, padding: "5px 12px", fontWeight: 600 }}>
-              Marked {fmtDistance(a.distanceM)} from the address
+            <iframe title={`Map of ${p.address}`} src={`https://maps.google.com/maps?q=${p.lat !== null && p.lng !== null ? `${p.lat},${p.lng}` : encodeURIComponent(p.address)}&z=14&output=embed`} style={{ border: 0, width: "100%", height: "100%" }} loading="lazy" />
+            <div className="small" style={{ position: "absolute", right: 12, top: 12, background: far ? "var(--red)" : a.distanceM < 0 ? "var(--muted)" : "var(--green)", color: "#fff", borderRadius: 99, padding: "5px 12px", fontWeight: 600 }}>
+              {a.distanceM < 0 ? "Address has no map pin" : `Marked ${fmtDistance(a.distanceM)} from the address`}
             </div>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
-            {ev(far, "Location", `${fmtDistance(a.distanceM)} from address`, `Limit is ${RULES.maxDistanceM} m`)}
+            {ev(far, "Location", a.distanceM < 0 ? "Not checked (no map pin)" : `${fmtDistance(a.distanceM)} from address`, `Limit is ${RULES.maxDistanceM} m`)}
             {ev(fewCalls, "Calls", `${a.calls} call${a.calls === 1 ? "" : "s"} from app`, `Required: ${RULES.minCalls} before a return`)}
             {ev(noPhoto, "Photo", noPhoto ? "No photo" : "Doorstep photo taken", noPhoto ? "Required for every return" : time(a.at), !noPhoto ? <PhotoThumb src={a.photo} size={64} /> : undefined)}
             {ev(disputed, "Customer SMS reply", a.customerReply ? `"${a.customerReply}"` : "No reply yet", a.customerReply ? "Customer disputes the visit" : "SMS sent after the return")}

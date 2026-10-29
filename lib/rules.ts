@@ -9,14 +9,23 @@ export const RULES = {
    *  "flag": the return is saved but flagged for admin review. */
   mode: "block" as "block" | "flag",
   cashLimit: 25000,
+  /** Ask for the customer's 4-digit code on delivery. Turn on once an SMS provider sends the code
+   *  to customers (NEXT_PUBLIC_REQUIRE_OTP=true). While off, a handover photo is required instead. */
+  requireOtp: process.env.NEXT_PUBLIC_REQUIRE_OTP === "true",
 };
 
-/** Demo mode shows OTPs and a distance slider so the flow can be tried away from real addresses. */
-export const DEMO = process.env.NEXT_PUBLIC_DEMO !== "false";
+/** Demo helpers: show the customer code and a distance slider so the flow can be tried away from
+ *  real addresses. Off unless NEXT_PUBLIC_DEMO=true. */
+export const DEMO = process.env.NEXT_PUBLIC_DEMO === "true";
+
+/** Flags that are recorded for review but never block the rider. */
+export const NON_BLOCKING = ["Code typed, not scanned", "Address has no map pin"];
 
 export function flagsFor(a: Pick<Attempt, "outcome" | "calls" | "distanceM" | "photo" | "manualScan" | "customerReply">): string[] {
   const f: string[] = [];
-  if (a.distanceM > RULES.maxDistanceM) f.push(`Marked ${a.distanceM >= 1000 ? (a.distanceM / 1000).toFixed(1) + " km" : a.distanceM + " m"} from address`);
+  if (a.distanceM < 0) f.push("Address has no map pin");
+  else if (a.distanceM > RULES.maxDistanceM)
+    f.push(`Marked ${a.distanceM >= 1000 ? (a.distanceM / 1000).toFixed(1) + " km" : a.distanceM + " m"} from address`);
   if (a.outcome === "returned") {
     if (a.calls === 0) f.push("No call made");
     else if (a.calls < RULES.minCalls) f.push(`Only ${a.calls} call`);

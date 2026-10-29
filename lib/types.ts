@@ -52,8 +52,9 @@ export interface Parcel {
   item: string;
   cod: number;
   otp: string;
-  lat: number;
-  lng: number;
+  lat: number | null; // from Shopify shipping address; null when Shopify has no map pin
+  lng: number | null;
+  isSample?: boolean;
   status: ParcelStatus;
   riderId?: string;
   createdAt: number;
@@ -79,6 +80,16 @@ export interface Deposit {
   amount: number;
   at: number;
   by: string;
+}
+
+export type Role = "admin" | "warehouse" | "rider";
+
+export interface Me {
+  userId: string;
+  email: string;
+  role: Role;
+  riderId: string | null;
+  name: string;
 }
 
 export interface AppState {

@@ -34,7 +34,7 @@ export default function ReturnPage() {
   const router = useRouter();
   const toast = useToast();
   const p = state.parcels.find((x) => x.trk === code);
-  const { distance, gps, gpsError, demo, setDemo, isDemo } = useDistance(p?.lat ?? 0, p?.lng ?? 0);
+  const { distance, gps, gpsError, demo, setDemo, isDemo, noPin } = useDistance(p?.lat ?? null, p?.lng ?? null);
   const [reason, setReason] = useState<ReturnReason | null>(null);
   const [photo, setPhoto] = useState<string | undefined>();
 
@@ -50,13 +50,14 @@ export default function ReturnPage() {
 
   const callsOk = p.calls.length >= RULES.minCalls;
   const photoOk = !RULES.photoRequired || !!photo;
-  const near = distance !== null && distance <= RULES.maxDistanceM;
+  const near = noPin || (distance !== null && distance <= RULES.maxDistanceM);
+  const dest = p.lat !== null && p.lng !== null ? `${p.lat},${p.lng}` : encodeURIComponent(p.address);
   const passed = [!!reason, callsOk, photoOk, near].filter(Boolean).length;
   const canSave = RULES.mode === "flag" ? !!reason : passed === 4;
 
   function save() {
     if (!reason) return;
-    const r = markReturn(p!.id, { reason, distanceM: distance ?? 99999, photo });
+    const r = markReturn(p!.id, { reason, distanceM: noPin ? -1 : distance ?? 99999, photo });
     if (!r.ok) return toast(r.message, "bad");
     toast(r.message, r.flags && r.flags.length ? "bad" : "good");
     router.replace("/rider");
@@ -75,7 +76,7 @@ export default function ReturnPage() {
       </div>
 
       <div className="phone-main" style={{ paddingBottom: 32 }}>
-        <div className="small muted">A return is saved only when all four checks pass. The customer also gets an SMS asking whether you visited.</div>
+        <div className="small muted">A return is saved only when all four checks pass.</div>
 
         <Check ok={!!reason} title="Reason">
           <div className="row wrap" style={{ gap: 6 }}>
@@ -108,13 +109,19 @@ export default function ReturnPage() {
             <span className="dot">{near ? <Icon name="check" size={14} stroke={3} /> : <Icon name="alert" size={14} stroke={3} />}</span>
             <div className="grow">
               <div style={{ fontWeight: 600, color: near ? undefined : "var(--red)" }}>
-                {distance === null ? "Finding your location…" : near ? `You're at the address (${fmtDistance(distance)})` : `You are ${fmtDistance(distance)} from the address`}
+                {noPin
+                  ? "This address has no map pin, so location isn't checked"
+                  : distance === null
+                    ? gpsError ?? "Finding your location…"
+                    : near
+                      ? `You're at the address (${fmtDistance(distance)})`
+                      : `You are ${fmtDistance(distance)} from the address`}
               </div>
               {!near && <div className="small muted">{gpsError && !isDemo ? gpsError : "Go to the customer's door to mark this return."}</div>}
             </div>
           </div>
           {!near && (
-            <a href={`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`} target="_blank" rel="noreferrer" className="btn sm" style={{ color: "var(--red)" }}>
+            <a href={`https://www.google.com/maps/dir/?api=1&destination=${dest}`} target="_blank" rel="noreferrer" className="btn sm" style={{ color: "var(--red)" }}>
               Navigate to address
             </a>
           )}

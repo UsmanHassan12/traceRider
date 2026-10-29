@@ -1,70 +1,102 @@
 # Rider Trace
 
-Front end for the Shopify rider tracking PWA: QR labels at the warehouse, rider scan-to-start rides,
+Shopify-connected rider delivery tracking: QR labels at the warehouse, rider scan-to-start rides,
 delivered / returned with proof, and an admin dashboard for daily tracking and return review.
 
-Built with Next.js 15 (App Router), React 19 and TypeScript. No database yet: everything runs on sample
-data kept in the browser's localStorage, so you can demo the whole flow today.
+Next.js 15 (App Router) + React 19 + TypeScript, with Supabase for the database, logins and live updates.
+Deploys to Vercel.
 
-## Run it
+---
+
+## 1. Set up Supabase (about 5 minutes)
+
+1. In Supabase, create a **New project** (pick the Mumbai or Singapore region, the closest to Pakistan).
+2. Open **SQL Editor › New query**, paste everything from `supabase/schema.sql`, and click **Run**.
+3. Create your own admin login:
+   - **Authentication › Users › Add user › Create new user**: your email + a password, tick **Auto Confirm User**.
+   - Back in **SQL Editor**, run (with your email and name):
+     ```sql
+     insert into public.staff (user_id, role, name)
+     select id, 'admin', 'Your Name' from auth.users where email = 'you@example.com';
+     ```
+4. Open **Project Settings › API** (or **API Keys**) and copy:
+   - Project URL → `NEXT_PUBLIC_SUPABASE_URL`
+   - anon / publishable key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - service_role / secret key → `SUPABASE_SERVICE_ROLE_KEY` (keep this one secret)
+
+## 2. Run it on your computer
 
 ```bash
 npm install
+copy .env.example .env.local     # Windows (use cp on Mac/Linux), then fill in the values
 npm run dev
 ```
 
-Open http://localhost:3000 and pick a role:
+Open http://localhost:3000, sign in with your admin email, and you land on the admin dashboard.
 
-| Screen | URL |
-| --- | --- |
-| Rider app (phone) | `/rider` (signs in at `/rider/login`) |
-| Warehouse dispatch desk | `/warehouse` |
-| Admin overview | `/admin` |
-| Return review | `/admin/review` |
+Run `npm run build` once before deploying. If it shows errors, fix them first: Vercel runs the same build.
 
-Demo sign-in: on the rider login, open "Demo rider numbers", tap one (Bilal Ahmed is 3001234471), send the code,
-and type any 6 digits.
+## 3. Deploy on Vercel
 
-### Try it on a phone
+1. Push this folder to GitHub.
+2. In Vercel: **Add New › Project**, import the GitHub repo. Framework is detected as Next.js.
+3. Before clicking Deploy, open **Environment Variables** and add the values from `.env.local`
+   (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `SHOPIFY_WEBHOOK_SECRET` once you have it).
+4. Deploy. Every push to GitHub redeploys automatically.
+5. In Supabase **Authentication › URL Configuration**, set **Site URL** to your Vercel address.
 
-The camera only works over HTTPS. Run:
+If you change an environment variable later, redeploy (Deployments › … › Redeploy) so the new value is used.
 
-```bash
-npm run dev:phone
-```
+## 4. Add your team
 
-Then open `https://<your-computer's-IP>:3000/rider` on a phone on the same Wi-Fi and accept the certificate warning.
-You can also install it to the home screen (it ships a PWA manifest).
+Admin › **Staff & riders** › *Add a login*. Pick the role:
 
-## Try the full flow
+| Role | Signs in to | Can do |
+| --- | --- | --- |
+| Rider | `/rider` (phone) | Scan parcels handed to them, deliver, return with proof, cash |
+| Warehouse desk | `/warehouse` | Print labels, hand over to riders, check returns in, receive cash |
+| Admin | `/admin` | Everything, plus staff and return reviews |
 
-1. **Warehouse** (`/warehouse`): click *Sync Shopify*, *Print label* on an order, then *Label printed and pasted*.
-   Pick **Bilal Ahmed** on the right, type the tracking code (e.g. `RT1230-...`) in the scan box or click *Add to handover*,
-   then *Confirm handover*.
-2. **Rider** (`/rider`, signed in as Bilal, in another tab of the same browser): *Scan parcel QR*. Point the camera at the
-   label on the warehouse screen, or tap *Label damaged? Type the code instead*. Start the ride.
-3. On the ride, tap **Delivered** (the demo shows the customer's code) or **Can't deliver**. A return only saves when it has
-   a reason, 2 logged calls, a doorstep photo, and the rider within 300 m of the address. Demo mode adds a slider to fake the distance.
-4. **Admin** (`/admin`): the day's numbers, return rate per rider against the team, reasons, custody counts, and
-   *Returns review* with evidence and a decision for each flagged return.
+Everyone signs in at `/login`. A rider only ever sees parcels handed to them.
 
-*Reset demo data* on the warehouse screen restores the sample day.
+To show the dashboard before real orders arrive, use **Load sample day** on the same page.
+**Remove sample data** deletes only the sample records.
 
-## Where to change things
+## 5. Connect Shopify
 
-| What | File |
+1. Shopify admin › **Settings › Notifications › Webhooks › Create webhook**
+   - Event: **Order creation** · Format: **JSON**
+   - URL: `https://<your-app>.vercel.app/api/shopify/webhook`
+2. Copy the signing secret shown under the webhooks list into `SHOPIFY_WEBHOOK_SECRET` on Vercel and redeploy.
+3. Place a test order. It appears on the warehouse desk under **Print label** within seconds.
+
+COD amount = the order's outstanding amount (0 for prepaid orders). The map pin comes from the shipping address
+when Shopify has one; without it the location check is skipped and noted on the parcel.
+
+## Daily flow
+
+1. **Warehouse**: Print label → paste on box → pick rider → scan boxes into the handover → Confirm handover.
+2. **Rider**: Scan parcel QR → Start ride → **Delivered** (handover photo) or **Can't deliver**
+   (reason + 2 calls from the app + doorstep photo + within 300 m of the address).
+3. **Warehouse**: scan returned boxes to check them in; scan the rider's cash code to record the deposit.
+4. **Admin**: daily numbers, return rate per rider vs team, flagged returns with evidence and a decision.
+
+## Settings
+
+| What | Where |
 | --- | --- |
 | Return rules (calls, distance, photo, block or flag) and cash limit | `lib/rules.ts` |
-| Sample riders, areas and the sample day | `lib/seed.ts` |
-| All actions (handover, start ride, deliver, return, review) | `lib/store.tsx` |
-| Colours and shared styles | `app/globals.css` |
+| Require the customer's SMS code on delivery (needs an SMS provider) | `NEXT_PUBLIC_REQUIRE_OTP=true` |
+| Warehouse phone on the rider profile | `NEXT_PUBLIC_DESK_PHONE` |
+| Colours | `app/globals.css` |
 
-Set `NEXT_PUBLIC_DEMO=false` in `.env.local` to hide demo helpers (OTP hints, distance slider, rider numbers) and use real GPS.
+Phones need location and camera permission. Both only work over HTTPS, which Vercel provides.
+For testing on a phone before deploying: `npm run dev:phone` and open `https://<your-PC-IP>:3000`.
 
-## Next steps for production
+## Not done yet
 
-- Replace `lib/store.tsx` actions with calls to a real API and database (orders, parcels, custody events, riders).
-- Shopify: an `orders/create` webhook to create parcels, and mark orders fulfilled on delivery.
-- SMS: send the customer delivery code and the "did the rider visit?" message (e.g. through a local SMS gateway).
-- Real sign-in: SMS OTP plus device binding and the shift selfie.
-- Store doorstep photos in object storage instead of the browser.
+- SMS to customers (delivery code, "did the rider visit?"). Needs an SMS provider.
+- Marking the Shopify order fulfilled on delivery. Needs a Shopify Admin API token.
+- Doorstep photos are stored inside the parcel record (small JPEGs). Move to Supabase Storage if volume grows.
+- Status changes are checked in the app; a rider with technical skill could still edit their own parcels through the API.
+  Moving the rules into database functions closes that gap.

@@ -85,7 +85,7 @@ export default function CashPage() {
         <div className="overlay" onClick={(e) => e.target === e.currentTarget && setShowCode(false)}>
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="dep-title" style={{ alignItems: "center", textAlign: "center" }}>
             <h2 id="dep-title">Deposit {pkr(cash.inHand)}</h2>
-            <div className="small muted">The cashier scans this code, counts the cash and confirms. You&apos;ll see the deposit in your activity.</div>
+            <div className="small muted">The warehouse desk scans this code, counts the cash and records it. The deposit then shows in your activity.</div>
             <div style={{ background: "#fff", padding: 12, borderRadius: 12, border: "1px solid var(--line)" }}>
               <QRCodeSVG value={depositCode} size={200} level="M" />
             </div>

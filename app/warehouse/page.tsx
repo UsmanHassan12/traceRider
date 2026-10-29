@@ -6,20 +6,20 @@ import { Icon } from "@/components/Icon";
 import { LabelSheet } from "@/components/LabelSheet";
 import { useToast } from "@/components/Toast";
 import { ago, initials, pkr, time } from "@/lib/format";
-import { useStore } from "@/lib/store";
+import { cashInHand, useStore } from "@/lib/store";
 import type { Parcel } from "@/lib/types";
 
 type Banner = { tone: "good" | "bad"; title: string; sub?: string; undo?: () => void } | null;
 
 export default function WarehouseDesk() {
-  const { ready, state, syncShopify, printLabel, handover, receiveReturn, reset } = useStore();
+  const { ready, state, me, addTestOrder, printLabel, handover, receiveReturn, deposit, signOut } = useStore();
   const toast = useToast();
   const [code, setCode] = useState("");
   const [riderId, setRiderId] = useState<string | null>(null);
   const [tray, setTray] = useState<string[]>([]);
   const [banner, setBanner] = useState<Banner>(null);
   const [labelFor, setLabelFor] = useState<Parcel | null>(null);
-  const [confirmReset, setConfirmReset] = useState(false);
+  const [cashFor, setCashFor] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -61,6 +61,15 @@ export default function WarehouseDesk() {
     const raw = code.trim();
     setCode("");
     if (!raw) return;
+    if (raw.startsWith("DEPOSIT|")) {
+      const rid = raw.split("|")[1];
+      if (!state.riders.some((r) => r.id === rid)) {
+        setBanner({ tone: "bad", title: "Unknown rider on this cash code" });
+        return;
+      }
+      setCashFor(rid);
+      return;
+    }
     const norm = raw.toUpperCase().replace(/^#/, "");
     const p = state.parcels.find((x) => x.trk.toUpperCase() === norm || x.id.replace("#", "") === norm);
     if (!p) {
@@ -111,22 +120,27 @@ export default function WarehouseDesk() {
         <span style={{ width: 68, minHeight: 60, borderRadius: 12, background: "rgba(0,0,0,.22)", color: "#fff", fontWeight: 600, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}>
           <Icon name="scan" size={22} />Dispatch
         </span>
-        <Link href="/admin" style={{ width: 68, minHeight: 60, borderRadius: 12, color: "#f7d9d9", textDecoration: "none", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}>
-          <Icon name="grid" size={22} />Admin
-        </Link>
+        {me?.role === "admin" && (
+          <Link href="/admin" style={{ width: 68, minHeight: 60, borderRadius: 12, color: "#f7d9d9", textDecoration: "none", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}>
+            <Icon name="grid" size={22} />Admin
+          </Link>
+        )}
+        <button type="button" onClick={() => signOut()} style={{ marginTop: "auto", width: 68, minHeight: 60, borderRadius: 12, border: 0, background: "transparent", color: "#f7d9d9", fontSize: 11, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer" }}>
+          <Icon name="logout" size={22} />Sign out
+        </button>
       </nav>
 
       <main style={{ flex: "999 1 560px", minWidth: 0, display: "flex", flexDirection: "column", gap: 16, padding: "18px 22px" }}>
         <div className="row between wrap" style={{ gap: 12 }}>
           <div>
-            <div className="small muted">Warehouse I-9 · Desk 2 · Imran</div>
+            <div className="small muted">Signed in as {me?.name || me?.email}</div>
             <h1>Dispatch desk</h1>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>
-            <button type="button" className="btn sm" onClick={() => { const k = syncShopify(); toast(`Synced ${k} new order${k > 1 ? "s" : ""} from Shopify (demo).`); }}>
-              <Icon name="refresh" size={16} /> Sync Shopify
+            <span className="row xs muted" style={{ gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--green)" }} />New Shopify orders appear here by themselves</span>
+            <button type="button" className="btn sm" onClick={() => { addTestOrder(); toast("Test order added."); }}>
+              Add test order
             </button>
-            <button type="button" className="btn sm ghost" onClick={() => setConfirmReset(true)}>Reset demo data</button>
           </div>
         </div>
 
@@ -233,6 +247,12 @@ export default function WarehouseDesk() {
         <button type="button" className="btn red xl" disabled={!rider || tray.length === 0} onClick={confirmHandover} style={{ marginTop: "auto" }}>
           {rider ? `Confirm handover to ${rider.name.split(" ")[0]} (${tray.length})` : "Pick a rider"}
         </button>
+        {rider && (
+          <button type="button" className="btn" onClick={() => setCashFor(rider.id)}>
+            <Icon name="cash" size={18} /> Receive cash from {rider.name.split(" ")[0]} · {pkr(cashInHand(state, rider.id).inHand)}
+          </button>
+        )}
+        {state.riders.length === 0 && <div className="xs muted">No riders yet. The admin adds them on the Staff page.</div>}
       </aside>
 
       {labelFor && (
@@ -255,18 +275,31 @@ export default function WarehouseDesk() {
         </div>
       )}
 
-      {confirmReset && (
-        <div className="overlay" onClick={(e) => e.target === e.currentTarget && setConfirmReset(false)}>
-          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="rs-title">
-            <h2 id="rs-title">Reset demo data?</h2>
-            <div className="small muted">This clears everything in this browser and reloads the sample day.</div>
-            <div className="row" style={{ justifyContent: "flex-end" }}>
-              <button type="button" className="btn" onClick={() => setConfirmReset(false)}>Cancel</button>
-              <button type="button" className="btn red" onClick={() => { reset(); setTray([]); setBanner(null); setConfirmReset(false); toast("Demo data restored."); }}>Reset</button>
+      {cashFor && (() => {
+        const r = state.riders.find((x) => x.id === cashFor);
+        const amount = cashInHand(state, cashFor).inHand;
+        return (
+          <div className="overlay" onClick={(e) => e.target === e.currentTarget && setCashFor(null)}>
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="cash-title">
+              <h2 id="cash-title">Cash deposit · {r?.name}</h2>
+              <div className="small muted">Count the cash from the rider. The app expects:</div>
+              <div className="num" style={{ fontSize: 30, fontWeight: 700 }}>{pkr(amount)}</div>
+              <div className="xs muted">COD from today&apos;s deliveries minus what the rider already deposited today.</div>
+              <div className="row" style={{ justifyContent: "flex-end" }}>
+                <button type="button" className="btn" onClick={() => setCashFor(null)}>Cancel</button>
+                <button
+                  type="button"
+                  className="btn green"
+                  disabled={amount <= 0}
+                  onClick={() => { deposit(cashFor, amount); toast(`${pkr(amount)} received from ${r?.name}.`, "good"); setCashFor(null); input.current?.focus(); }}
+                >
+                  Cash counted, record {pkr(amount)}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

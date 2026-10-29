@@ -1,11 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
 import { Icon } from "@/components/Icon";
 import { useToast } from "@/components/Toast";
 import { initials, time } from "@/lib/format";
-import { DEMO } from "@/lib/rules";
 import { cashInHand } from "@/lib/store";
 import type { Parcel } from "@/lib/types";
 import { useRider } from "@/lib/useRider";
@@ -27,10 +25,9 @@ function stats(list: Parcel[]) {
 }
 
 export default function ProfilePage() {
-  const { state, rider, logout } = useRider();
+  const { state, rider, signOut, me } = useRider();
   const router = useRouter();
   const toast = useToast();
-  const [lang, setLang] = useState<"en" | "ur">("en");
   if (!rider) return null;
 
   const mine = stats(state.parcels.filter((p) => p.riderId === rider.id));
@@ -46,16 +43,15 @@ export default function ProfilePage() {
       toast(`You still hold ${holding} parcel${holding === 1 ? "" : "s"} and ${cash > 0 ? "cash" : "no cash"}. Return them to the warehouse first.`, "bad");
       return;
     }
-    logout();
-    router.replace("/rider/login");
+    void signOut().then(() => router.replace("/login"));
   }
 
   const rows: [string, string][] = [
-    ["Mobile", `+92 ${rider.phone.slice(0, 3)} ${rider.phone.slice(3)}`],
-    ["Bike", rider.bike],
-    ["Driving licence", rider.licence],
-    ["Warehouse", "I-9 · Desk 2"],
+    ["Mobile", rider.phone || "Not set"],
+    ["Bike", rider.bike || "Not set"],
+    ["Driving licence", rider.licence || "Not set"],
   ];
+  const deskPhone = process.env.NEXT_PUBLIC_DESK_PHONE ?? "";
 
   return (
     <>
@@ -91,33 +87,18 @@ export default function ProfilePage() {
           ))}
         </section>
 
-        <section className="card" style={{ borderRadius: 14, padding: "4px 14px" }}>
-          <div className="row between" style={{ minHeight: 48, borderBottom: "1px solid #eef1f5" }}>
-            <span>Language</span>
-            <span className="row" style={{ gap: 4 }}>
-              <button type="button" className="chip" aria-pressed={lang === "en"} onClick={() => setLang("en")}>English</button>
-              <button type="button" className="chip" aria-pressed={lang === "ur"} onClick={() => setLang("ur")} lang="ur">اردو</button>
-            </span>
-          </div>
-          <a href="tel:" className="row between" style={{ minHeight: 48, borderBottom: "1px solid #eef1f5", color: "var(--ink)", textDecoration: "none" }}>
-            <span>Call warehouse desk</span>
-            <span className="small muted">[DESK NUMBER]</span>
+        {deskPhone && (
+          <a href={`tel:${deskPhone.replace(/\s/g, "")}`} className="card row between" style={{ borderRadius: 14, minHeight: 52, color: "var(--ink)", textDecoration: "none" }}>
+            <span className="row" style={{ gap: 10 }}><Icon name="phone" size={18} />Call warehouse desk</span>
+            <span className="small muted">{deskPhone}</span>
           </a>
-          <button type="button" onClick={() => toast("Problem reported to the warehouse.")} className="row between" style={{ minHeight: 48, width: "100%", border: 0, background: "none", padding: 0, cursor: "pointer" }}>
-            <span>Report a problem</span>
-            <Icon name="chevron" size={18} color="var(--muted)" />
-          </button>
-        </section>
+        )}
 
         <button type="button" className="btn danger-outline xl" onClick={endShift}>
           <Icon name="logout" size={18} /> End shift and sign out
         </button>
         <div className="xs muted" style={{ textAlign: "center", marginTop: -6 }}>You can&apos;t end a shift while you hold parcels or cash.</div>
-        {DEMO && (
-          <button type="button" className="btn ghost sm" onClick={() => { logout(); router.replace("/rider/login"); }}>
-            Demo: sign in as another rider
-          </button>
-        )}
+        <div className="xs muted" style={{ textAlign: "center" }}>Signed in as {me?.email}</div>
       </div>
     </>
   );

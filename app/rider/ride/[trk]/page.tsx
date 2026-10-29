@@ -19,7 +19,7 @@ export default function RidePage() {
   const router = useRouter();
   const toast = useToast();
   const p = state.parcels.find((x) => x.trk === code);
-  const { distance, gps, gpsError, demo, setDemo, isDemo } = useDistance(p?.lat ?? 0, p?.lng ?? 0);
+  const { distance, gps, gpsError, demo, setDemo, isDemo, noPin } = useDistance(p?.lat ?? null, p?.lng ?? null);
   const [delivering, setDelivering] = useState(false);
   const [otp, setOtp] = useState("");
   const [photo, setPhoto] = useState<string | undefined>();
@@ -47,11 +47,13 @@ export default function RidePage() {
     );
   }
 
-  const mapsDir = `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`;
-  const embed = `https://maps.google.com/maps?q=${p.lat},${p.lng}&z=15&output=embed`;
+  const dest = p.lat !== null && p.lng !== null ? `${p.lat},${p.lng}` : encodeURIComponent(p.address);
+  const mapsDir = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+  const embed = `https://maps.google.com/maps?q=${dest}&z=15&output=embed`;
 
   function confirmDelivery() {
-    const r = deliver(p!.id, { otp, distanceM: distance ?? 0, photo });
+    if (!noPin && distance === null) return toast("Turn on location so the delivery can be checked against the address.", "bad");
+    const r = deliver(p!.id, { otp, distanceM: noPin ? -1 : distance ?? -1, photo });
     if (!r.ok) return toast(r.message, "bad");
     toast(r.message, "good");
     router.replace("/rider");
@@ -113,7 +115,7 @@ export default function RidePage() {
           <Icon name="info" size={16} />
           <span>
             Calls go through the app and are logged. {p.calls.length} call{p.calls.length === 1 ? "" : "s"} so far.
-            {distance !== null ? ` You are ${fmtDistance(distance)} from the address.` : gpsError ? ` ${gpsError}` : " Finding your location…"}
+            {noPin ? " This address has no map pin from Shopify." : distance !== null ? ` You are ${fmtDistance(distance)} from the address.` : gpsError ? ` ${gpsError}` : " Finding your location…"}
           </span>
         </div>
 
@@ -131,7 +133,9 @@ export default function RidePage() {
             <Icon name="check" stroke={2.6} /> Delivered
           </button>
         </div>
-        <div className="xs muted" style={{ textAlign: "center", marginTop: -4 }}>Delivered asks for the customer&apos;s 4-digit SMS code</div>
+        <div className="xs muted" style={{ textAlign: "center", marginTop: -4 }}>
+          {RULES.requireOtp ? "Delivered asks for the customer's 4-digit SMS code" : "Delivered asks for a photo of the handover"}
+        </div>
       </div>
 
       {delivering && (
@@ -139,18 +143,20 @@ export default function RidePage() {
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="dlv-title">
             <h2 id="dlv-title">Confirm delivery</h2>
             <div className="small muted">{p.customer} · collect <b style={{ color: "var(--ink)" }}>{pkr(p.cod)}</b></div>
+            {RULES.requireOtp && (
+              <div className="field">
+                <label htmlFor="otp">Customer&apos;s 4-digit code</label>
+                <input id="otp" className="input mono" inputMode="numeric" maxLength={4} autoFocus value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} style={{ fontSize: 22, letterSpacing: ".3em", textAlign: "center" }} />
+                {DEMO && <span className="xs" style={{ color: "var(--amber-ink)" }}>Demo: the customer&apos;s code is {p.otp}</span>}
+              </div>
+            )}
             <div className="field">
-              <label htmlFor="otp">Customer&apos;s 4-digit code</label>
-              <input id="otp" className="input mono" inputMode="numeric" maxLength={4} autoFocus value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} style={{ fontSize: 22, letterSpacing: ".3em", textAlign: "center" }} />
-              {DEMO && <span className="xs" style={{ color: "var(--amber-ink)" }}>Demo: the customer&apos;s code is {p.otp}</span>}
-            </div>
-            <div className="field">
-              <span style={{ fontSize: 13, fontWeight: 500 }}>Photo of handover (optional)</span>
+              <span style={{ fontSize: 13, fontWeight: 500 }}>Photo of the handover{RULES.requireOtp ? " (optional)" : ""}</span>
               <PhotoCapture id="dlv-photo" value={photo} onChange={setPhoto} />
             </div>
             <div className="row" style={{ justifyContent: "flex-end" }}>
               <button type="button" className="btn" onClick={() => setDelivering(false)}>Cancel</button>
-              <button type="button" className="btn green" disabled={otp.length !== 4} onClick={confirmDelivery}>Confirm delivery</button>
+              <button type="button" className="btn green" disabled={RULES.requireOtp ? otp.length !== 4 : !photo} onClick={confirmDelivery}>Confirm delivery</button>
             </div>
           </div>
         </div>

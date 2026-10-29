@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { IBM_Plex_Mono, Poppins } from "next/font/google";
 import "./globals.css";
 import { StoreProvider } from "@/lib/store";
+import { SyncErrors } from "@/components/SyncErrors";
 import { ToastProvider } from "@/components/Toast";
 
 const poppins = Poppins({ subsets: ["latin"], weight: ["400", "500", "600", "700"], variable: "--font-poppins" });
@@ -26,7 +27,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${poppins.variable} ${mono.variable}`}>
       <body>
         <StoreProvider>
-          <ToastProvider>{children}</ToastProvider>
+          <ToastProvider>
+            <SyncErrors />
+            {children}
+          </ToastProvider>
         </StoreProvider>
       </body>
     </html>

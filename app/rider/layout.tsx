@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { Icon } from "@/components/Icon";
-import { useStore } from "@/lib/store";
+import { RoleGate } from "@/components/RoleGate";
 
 const TABS = [
   { href: "/rider", label: "Home", icon: "home" as const },
@@ -15,42 +14,33 @@ const TABS = [
 ];
 
 export default function RiderLayout({ children }: { children: React.ReactNode }) {
-  const { ready, state } = useStore();
   const path = usePathname();
-  const router = useRouter();
-  const onLogin = path === "/rider/login";
-  const showTabs = !onLogin && !path.startsWith("/rider/scan") && !path.startsWith("/rider/ride");
-
-  useEffect(() => {
-    if (ready && !state.currentRiderId && !onLogin) router.replace("/rider/login");
-  }, [ready, state.currentRiderId, onLogin, router]);
-
-  if (!ready || (!state.currentRiderId && !onLogin)) {
-    return <div className="phone" aria-busy="true" />;
-  }
+  const showTabs = !path.startsWith("/rider/scan") && !path.startsWith("/rider/ride") && path !== "/rider/login";
 
   return (
-    <div className="phone">
-      {children}
-      {showTabs && (
-        <nav className="tabbar" aria-label="Rider">
-          {TABS.map((t) =>
-            t.fab ? (
-              <Link key={t.href} href={t.href} aria-label="Scan parcel" style={{ color: "var(--navy)", fontWeight: 600 }}>
-                <span className="scan-fab">
-                  <Icon name={t.icon} size={24} stroke={2.2} />
-                </span>
-                {t.label}
-              </Link>
-            ) : (
-              <Link key={t.href} href={t.href} aria-current={path === t.href ? "page" : undefined}>
-                <Icon name={t.icon} size={22} />
-                {t.label}
-              </Link>
-            )
-          )}
-        </nav>
-      )}
-    </div>
+    <RoleGate roles={["rider"]}>
+      <div className="phone">
+        {children}
+        {showTabs && (
+          <nav className="tabbar" aria-label="Rider">
+            {TABS.map((t) =>
+              t.fab ? (
+                <Link key={t.href} href={t.href} aria-label="Scan parcel" style={{ color: "var(--navy)", fontWeight: 600 }}>
+                  <span className="scan-fab">
+                    <Icon name={t.icon} size={24} stroke={2.2} />
+                  </span>
+                  {t.label}
+                </Link>
+              ) : (
+                <Link key={t.href} href={t.href} aria-current={path === t.href ? "page" : undefined}>
+                  <Icon name={t.icon} size={22} />
+                  {t.label}
+                </Link>
+              )
+            )}
+          </nav>
+        )}
+      </div>
+    </RoleGate>
   );
 }
