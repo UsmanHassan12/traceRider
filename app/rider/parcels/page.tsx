@@ -14,6 +14,7 @@ export default function ParcelsPage() {
   const { state, rider } = useRider();
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   if (!rider) return null;
 
   const today = state.parcels.filter(
@@ -77,7 +78,7 @@ export default function ParcelsPage() {
         {groups.map((g) => (
           <section key={g.title} className="stack" style={{ gap: 8 }}>
             <h2 className="xs" style={{ color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 600 }}>{g.title}</h2>
-            {g.items.map((p) => {
+            {g.items.slice(0, open[g.title] ? undefined : 10).map((p) => {
               const body = (
                 <>
                   <span className="row between">
@@ -100,6 +101,11 @@ export default function ParcelsPage() {
                 <div key={p.id} className="card" style={style}>{body}</div>
               );
             })}
+            {g.items.length > 10 && !open[g.title] && (
+              <button type="button" className="btn ghost" onClick={() => setOpen({ ...open, [g.title]: true })}>
+                Show {g.items.length - 10} more
+              </button>
+            )}
           </section>
         ))}
       </div>

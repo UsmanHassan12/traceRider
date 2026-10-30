@@ -79,7 +79,7 @@ export default function StaffPage() {
   const hasSample = state.parcels.some((p) => p.isSample);
 
   return (
-    <main style={{ padding: "26px 32px 48px", display: "flex", flexDirection: "column", gap: 22, maxWidth: 1100 }}>
+    <main className="adm-main" style={{ maxWidth: 1100 }}>
       <div>
         <h1 style={{ fontSize: 26 }}>Staff &amp; riders</h1>
         <div className="small muted">Every person signs in at /login with the email and password you set here.</div>
@@ -90,7 +90,7 @@ export default function StaffPage() {
           <h2>Logins</h2>
           {loadErr && <div className="small" style={{ color: "var(--red)" }}>{loadErr}</div>}
           {!logins && !loadErr && <div className="small muted">Loading…</div>}
-          <div className="table-wrap">
+          <div className="table-wrap scroll-box">
             <table className="data" style={{ minWidth: 520 }}>
               <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Rider</th><th /></tr></thead>
               <tbody>

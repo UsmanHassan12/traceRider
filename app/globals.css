@@ -155,11 +155,85 @@ table.data td { padding: 11px 10px; border-bottom: 1px solid #eef1f5; vertical-a
 .label-sheet .trk { font-family: var(--font-mono), monospace; font-size: 20px; font-weight: 600; letter-spacing: .06em; text-align: center; padding: 6px; border-top: 1px dashed #111; }
 .label-sheet .lf { display: flex; justify-content: space-between; padding: 8px 10px; border-top: 2px solid #111; font-family: var(--font-mono), monospace; font-weight: 600; }
 
+/* printing: only the labels in .print-root are printed, one label per page */
+.print-root { display: none; }
 @media print {
-  body * { visibility: hidden; }
-  .print-area, .print-area * { visibility: visible; }
-  .print-area { position: absolute; left: 0; top: 0; }
+  body > *:not(.print-root) { display: none !important; }
+  .print-root { display: block; }
+  .print-root .label-sheet { break-after: page; page-break-after: always; margin: 0 auto; }
+  .print-root .label-sheet:last-child { break-after: auto; page-break-after: auto; }
 }
+
+/* ───────── Warehouse desk layout ─────────
+   Desktop: nav | work area | handover panel, the page never grows taller than the screen;
+   each list scrolls inside its own column. Tablet: panel moves under the work area.
+   Phone: nav becomes a top bar and everything stacks. */
+.wh { display: grid; grid-template-columns: 84px minmax(0, 1fr) 360px; height: 100dvh; overflow: hidden; background: var(--ground); }
+.wh-nav { background: var(--red); color: #f7d9d9; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 18px 0; font-size: 11px; }
+.wh-nav a, .wh-nav button, .wh-nav span.nav-item { width: 68px; min-height: 60px; border-radius: 12px; border: 0; background: transparent; color: #f7d9d9; text-decoration: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 11px; cursor: pointer; }
+.wh-nav .nav-item.active { background: rgba(0, 0, 0, .22); color: #fff; font-weight: 600; }
+.wh-nav .logo { width: 44px; min-height: 44px; height: 44px; border-radius: 11px; background: #fff; color: var(--red); margin-bottom: 14px; }
+.wh-nav .signout { margin-top: auto; }
+.wh-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px 22px; overflow: hidden; }
+.wh-main > * { flex: none; }
+.wh-main > .wh-cols { flex: 1 1 auto; }
+.wh-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.wh-col { min-height: 0; display: flex; flex-direction: column; gap: 8px; border-radius: 14px; padding: 12px; background: #ebeff4; }
+.wh-col.bad { background: #fbedec; }
+.wh-col-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px; flex-wrap: wrap; }
+.wh-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 2px; overscroll-behavior: contain; }
+.wh-row { background: #fff; border-radius: 10px; padding: 8px 10px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; align-items: center; }
+.wh-row .sub { grid-column: 1; font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wh-row .act { grid-row: 1 / span 2; grid-column: 2; }
+.wh-side { min-height: 0; background: #fff; border-left: 1px solid var(--line); padding: 18px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
+.wh-riders { display: flex; flex-direction: column; gap: 6px; max-height: 36%; overflow-y: auto; flex: none; }
+.wh-tray { flex: 1; min-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+
+@media (max-width: 1100px) {
+  .wh { grid-template-columns: 84px minmax(0, 1fr); grid-template-rows: auto auto; height: auto; min-height: 100dvh; overflow: visible; }
+  .wh-nav { grid-row: 1 / span 2; }
+  .wh-main { overflow: visible; }
+  .wh-side { grid-column: 2; border-left: 0; border-top: 1px solid var(--line); overflow: visible; }
+  .wh-riders { max-height: 260px; }
+  .wh-tray { max-height: 320px; }
+  .wh-list { max-height: 55vh; }
+}
+@media (max-width: 760px) {
+  .wh { grid-template-columns: minmax(0, 1fr); }
+  .wh-nav { grid-row: auto; flex-direction: row; justify-content: flex-start; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); position: sticky; top: 0; z-index: 15; }
+  .wh-nav .logo { margin: 0 8px 0 0; }
+  .wh-nav a, .wh-nav button, .wh-nav span.nav-item { width: auto; min-height: 44px; padding: 0 12px; flex-direction: row; font-size: 13px; }
+  .wh-nav .signout { margin: 0 0 0 auto; }
+  .wh-main { padding: 14px 16px; }
+  .wh-cols { grid-template-columns: minmax(0, 1fr); }
+  .wh-side { grid-column: 1; padding: 16px; }
+  .wh-list { max-height: 50vh; }
+}
+
+/* ───────── Admin layout ─────────
+   Desktop: sidebar + content. Under 900px the sidebar becomes a top bar with a scrolling menu. */
+.adm { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100dvh; background: var(--ground); }
+.adm-side { background: #fff; border-right: 1px solid var(--line); padding: 22px 16px; display: flex; flex-direction: column; gap: 22px; position: sticky; top: 0; height: 100dvh; overflow-y: auto; }
+.adm-nav { display: flex; flex-direction: column; gap: 2px; }
+.adm-nav a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; text-decoration: none; color: var(--ink-2); white-space: nowrap; }
+.adm-nav a[aria-current="page"] { background: #fbeaea; color: var(--red); font-weight: 600; }
+.adm-foot { margin-top: auto; }
+.adm-main { min-width: 0; padding: 26px 32px 48px; display: flex; flex-direction: column; gap: 22px; max-width: 1280px; width: 100%; }
+@media (max-width: 900px) {
+  .adm { grid-template-columns: minmax(0, 1fr); }
+  .adm-side { position: sticky; top: 0; z-index: 15; height: auto; flex-direction: row; align-items: center; gap: 10px; padding: 10px 16px; padding-top: max(10px, env(safe-area-inset-top)); border-right: 0; border-bottom: 1px solid var(--line); overflow: visible; }
+  .adm-side .brand-text { display: none; }
+  .adm-nav { flex-direction: row; overflow-x: auto; flex: 1; min-width: 0; scrollbar-width: none; }
+  .adm-nav a { padding: 8px 10px; font-size: 13px; }
+  .adm-foot { margin: 0; }
+  .adm-foot .who { display: none; }
+  .adm-foot .card { padding: 0 !important; border: 0; background: none; }
+  .adm-main { padding: 18px 16px 40px; gap: 16px; }
+}
+
+/* scroll box for long lists inside cards */
+.scroll-box { max-height: 420px; overflow-y: auto; overscroll-behavior: contain; }
+.pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 
 @media (prefers-reduced-motion: no-preference) {
   .toast { animation: rise .2s ease-out; }

@@ -4,22 +4,27 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { LabelSheet } from "@/components/LabelSheet";
+import { PrintLabels } from "@/components/PrintLabels";
 import { useToast } from "@/components/Toast";
+import { fulfillInShopify } from "@/lib/api";
 import { ago, initials, pkr, time } from "@/lib/format";
 import { cashInHand, useStore } from "@/lib/store";
 import type { Parcel } from "@/lib/types";
 
 type Banner = { tone: "good" | "bad"; title: string; sub?: string; undo?: () => void } | null;
 
+const BATCH = 50; // labels per print run
+
 export default function WarehouseDesk() {
-  const { ready, state, me, addTestOrder, printLabel, handover, receiveReturn, deposit, signOut } = useStore();
+  const { ready, state, me, addTestOrder, printLabel, printLabels, handover, receiveReturn, deposit, signOut } = useStore();
   const toast = useToast();
   const [code, setCode] = useState("");
   const [riderId, setRiderId] = useState<string | null>(null);
   const [tray, setTray] = useState<string[]>([]);
   const [banner, setBanner] = useState<Banner>(null);
-  const [labelFor, setLabelFor] = useState<Parcel | null>(null);
+  const [printing, setPrinting] = useState<Parcel[] | null>(null);
   const [cashFor, setCashFor] = useState<string | null>(null);
+  const [q, setQ] = useState("");
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -29,15 +34,21 @@ export default function WarehouseDesk() {
   if (!ready) return <div aria-busy="true" />;
 
   const rider = state.riders.find((r) => r.id === riderId) ?? null;
+  const match = (p: Parcel) => {
+    const s = q.trim().toLowerCase();
+    return !s || [p.id, p.trk, p.customer, p.area, p.phone].some((x) => x.toLowerCase().includes(s));
+  };
   const toLabel = state.parcels.filter((p) => p.status === "new").sort((a, b) => a.createdAt - b.createdAt);
-  const ready4 = state.parcels.filter((p) => p.status === "labeled" && !tray.includes(p.trk));
+  const toLabelShown = toLabel.filter(match);
+  const ready4 = state.parcels.filter((p) => p.status === "labeled" && !tray.includes(p.trk)).filter(match);
   const returning = state.parcels.filter((p) => p.status === "returned").sort((a, b) => (a.attempt?.at ?? 0) - (b.attempt?.at ?? 0));
   const trayParcels = tray.map((t) => state.parcels.find((p) => p.trk === t)).filter((p): p is Parcel => !!p);
   const trayTotal = trayParcels.reduce((s, p) => s + p.cod, 0);
+  const shopifyErrors = state.parcels.filter((p) => p.shopifySync?.startsWith("error") && ["handed", "out"].includes(p.status));
 
   function addToTray(p: Parcel) {
     if (!rider) {
-      setBanner({ tone: "bad", title: "Pick the rider first", sub: "Choose who is taking the parcels on the right, then scan again." });
+      setBanner({ tone: "bad", title: "Pick the rider first", sub: "Choose who is taking the parcels, then scan again." });
       return;
     }
     if (tray.includes(p.trk)) {
@@ -71,12 +82,12 @@ export default function WarehouseDesk() {
       return;
     }
     const norm = raw.toUpperCase().replace(/^#/, "");
-    const p = state.parcels.find((x) => x.trk.toUpperCase() === norm || x.id.replace("#", "") === norm);
+    const p = state.parcels.find((x) => x.trk.toUpperCase() === norm || x.id.replace("#", "").toUpperCase() === norm);
     if (!p) {
-      setBanner({ tone: "bad", title: `No parcel found for ${raw}`, sub: "Check the label or sync Shopify orders." });
+      setBanner({ tone: "bad", title: `No parcel found for ${raw}`, sub: "Only confirmed Islamabad and Rawalpindi orders come into the app." });
       return;
     }
-    if (p.status === "new") return setLabelFor(p);
+    if (p.status === "new") return setPrinting([p]);
     if (p.status === "labeled") return addToTray(p);
     if (p.status === "returned") {
       const r = receiveReturn(p.trk);
@@ -87,12 +98,29 @@ export default function WarehouseDesk() {
     setBanner({ tone: "bad", title: `${p.trk} can't be used here`, sub: `Status: ${p.status}${who ? ` · with ${who}` : ""}` });
   }
 
+  async function syncShopify(ids: string[]) {
+    if (ids.length === 0) return;
+    const r = await fulfillInShopify(ids);
+    if (r.ok) toast(`Shopify: ${ids.length} order${ids.length > 1 ? "s" : ""} marked fulfilled.`, "good");
+    else toast(r.message ?? "Shopify could not be updated.", "bad");
+  }
+
   function confirmHandover() {
     if (!rider || tray.length === 0) return;
-    handover(rider.id, tray);
-    toast(`${tray.length} parcel${tray.length > 1 ? "s" : ""} handed to ${rider.name}. They must scan each box to start.`, "good");
+    const ids = handover(rider.id, tray);
+    toast(`${ids.length} parcel${ids.length > 1 ? "s" : ""} handed to ${rider.name}. Updating Shopify…`, "good");
     setTray([]);
     setBanner(null);
+    input.current?.focus();
+    void syncShopify(ids);
+  }
+
+  function markPrinted(list: Parcel[]) {
+    const ids = list.filter((p) => p.status === "new").map((p) => p.id);
+    if (ids.length === 1) printLabel(ids[0]);
+    else if (ids.length > 1) printLabels(ids);
+    toast(ids.length ? `${ids.length} label${ids.length > 1 ? "s" : ""} marked printed. Ready to hand over.` : "Done.", "good");
+    setPrinting(null);
     input.current?.focus();
   }
 
@@ -102,7 +130,7 @@ export default function WarehouseDesk() {
     const back = state.parcels.filter((p) => p.riderId === id && p.status === "returned").length;
     const bits = [`${live} live`];
     if (handed) bits.push(`${handed} not scanned`);
-    if (back) bits.push(`${back} return${back > 1 ? "s" : ""} not checked in`);
+    if (back) bits.push(`${back} return${back > 1 ? "s" : ""} to check in`);
     return bits.join(" · ");
   };
 
@@ -112,103 +140,146 @@ export default function WarehouseDesk() {
   };
 
   return (
-    <div style={{ minHeight: "100dvh", display: "flex", flexWrap: "wrap", background: "var(--ground)" }}>
-      <nav aria-label="Desk" style={{ flex: "0 0 84px", background: "var(--red)", color: "#f7d9d9", display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "18px 0", fontSize: 11 }}>
-        <Link href="/" aria-label="Home" style={{ width: 44, height: 44, borderRadius: 11, background: "#fff", color: "var(--red)", display: "grid", placeItems: "center", marginBottom: 14 }}>
+    <div className="wh">
+      <nav aria-label="Desk" className="wh-nav">
+        <Link href="/" aria-label="Home" className="logo">
           <Icon name="box" size={22} stroke={2.2} />
         </Link>
-        <span style={{ width: 68, minHeight: 60, borderRadius: 12, background: "rgba(0,0,0,.22)", color: "#fff", fontWeight: 600, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}>
-          <Icon name="scan" size={22} />Dispatch
-        </span>
+        <span className="nav-item active"><Icon name="scan" size={22} />Dispatch</span>
         {me?.role === "admin" && (
-          <Link href="/admin" style={{ width: 68, minHeight: 60, borderRadius: 12, color: "#f7d9d9", textDecoration: "none", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4 }}>
-            <Icon name="grid" size={22} />Admin
-          </Link>
+          <Link href="/admin"><Icon name="grid" size={22} />Admin</Link>
         )}
-        <button type="button" onClick={() => signOut()} style={{ marginTop: "auto", width: 68, minHeight: 60, borderRadius: 12, border: 0, background: "transparent", color: "#f7d9d9", fontSize: 11, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer" }}>
+        <button type="button" className="signout" onClick={() => signOut()}>
           <Icon name="logout" size={22} />Sign out
         </button>
       </nav>
 
-      <main style={{ flex: "999 1 560px", minWidth: 0, display: "flex", flexDirection: "column", gap: 16, padding: "18px 22px" }}>
+      <main className="wh-main">
         <div className="row between wrap" style={{ gap: 12 }}>
           <div>
             <div className="small muted">Signed in as {me?.name || me?.email}</div>
             <h1>Dispatch desk</h1>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>
-            <span className="row xs muted" style={{ gap: 6 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--green)" }} />New Shopify orders appear here by themselves</span>
-            <button type="button" className="btn sm" onClick={() => { addTestOrder(); toast("Test order added."); }}>
-              Add test order
-            </button>
+            <span className="row xs muted" style={{ gap: 6 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--green)" }} />Confirmed Shopify orders arrive here by themselves
+            </span>
+            <button type="button" className="btn sm" onClick={() => { addTestOrder(); toast("Test order added."); }}>Add test order</button>
           </div>
         </div>
 
-        <form onSubmit={onScan} className="row" style={{ gap: 12, background: "#fff", border: "2px solid var(--navy)", borderRadius: 14, padding: "6px 6px 6px 16px", boxShadow: "0 0 0 4px var(--navy-soft)" }}>
-          <Icon name="scan" size={26} color="var(--navy)" />
-          <label htmlFor="wh-scan" className="sr-only">Scan a box QR or type an order number</label>
-          <input ref={input} id="wh-scan" autoFocus autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Scan a box QR or type an order number" style={{ flex: 1, minWidth: 0, fontSize: 17, border: 0, outline: "none", background: "transparent", minHeight: 52 }} />
-          <button type="submit" className="btn navy">Enter</button>
-        </form>
+        <div className="row wrap" style={{ gap: 10 }}>
+          <form onSubmit={onScan} className="row grow" style={{ gap: 10, minWidth: 260, background: "#fff", border: "2px solid var(--navy)", borderRadius: 14, padding: "4px 4px 4px 14px", boxShadow: "0 0 0 4px var(--navy-soft)" }}>
+            <Icon name="scan" size={24} color="var(--navy)" />
+            <label htmlFor="wh-scan" className="sr-only">Scan a box QR or type an order number</label>
+            <input ref={input} id="wh-scan" autoFocus autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Scan a box QR or type an order number" style={{ flex: 1, minWidth: 0, fontSize: 16, border: 0, outline: "none", background: "transparent", minHeight: 46 }} />
+            <button type="submit" className="btn navy">Enter</button>
+          </form>
+          <div className="row" style={{ gap: 8, background: "#fff", border: "1px solid var(--line-2)", borderRadius: 12, padding: "0 12px", minHeight: 50, flex: "1 1 220px", maxWidth: 340 }}>
+            <Icon name="search" size={18} color="var(--muted)" />
+            <label htmlFor="wh-q" className="sr-only">Filter lists</label>
+            <input id="wh-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name, area, order" style={{ flex: 1, minWidth: 0, border: 0, outline: "none", background: "transparent" }} />
+          </div>
+        </div>
 
         {banner && (
-          <div role="status" className="row" style={{ gap: 14, background: banner.tone === "good" ? "var(--green)" : "var(--red)", color: "#fff", borderRadius: 14, padding: "14px 16px" }}>
-            <span style={{ width: 40, height: 40, borderRadius: "50%", background: "rgba(255,255,255,.2)", display: "grid", placeItems: "center" }}>
-              <Icon name={banner.tone === "good" ? "check" : "alert"} size={22} stroke={2.8} />
-            </span>
+          <div role="status" className="row" style={{ gap: 12, background: banner.tone === "good" ? "var(--green)" : "var(--red)", color: "#fff", borderRadius: 12, padding: "10px 14px", flex: "none" }}>
+            <Icon name={banner.tone === "good" ? "check" : "alert"} size={22} stroke={2.8} />
             <div className="grow">
-              <div style={{ fontWeight: 600, fontSize: 16 }}>{banner.title}</div>
+              <div style={{ fontWeight: 600 }}>{banner.title}</div>
               {banner.sub && <div className="small" style={{ opacity: 0.85 }}>{banner.sub}</div>}
             </div>
             {banner.undo && (
-              <button type="button" className="btn" onClick={banner.undo} style={{ background: "rgba(255,255,255,.18)", color: "#fff", border: 0 }}>
+              <button type="button" className="btn sm" onClick={banner.undo} style={{ background: "rgba(255,255,255,.18)", color: "#fff", border: 0 }}>
                 <Icon name="undo" size={16} /> Undo
               </button>
             )}
+            <button type="button" aria-label="Dismiss" className="icon-btn" style={{ width: 32, height: 32, background: "transparent", color: "#fff" }} onClick={() => setBanner(null)}>
+              <Icon name="x" size={16} />
+            </button>
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 14, alignItems: "start" }}>
-          <Column title="Print label" count={toLabel.length}>
-            {toLabel.length === 0 && <div className="small muted" style={{ padding: 6 }}>All orders have labels.</div>}
-            {toLabel.map((p) => (
-              <div key={p.id} className="card" style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, border: 0 }}>
-                <div className="row between"><b style={{ fontSize: 13 }}>{p.id}</b><span className="xs" style={{ color: ageColor(p.createdAt), fontWeight: 500 }}>{ago(p.createdAt)}</span></div>
-                <div className="small">{p.customer} · <span className="muted">{p.area}</span></div>
-                <button type="button" className="btn navy sm" onClick={() => setLabelFor(p)}><Icon name="printer" size={16} /> Print label</button>
-              </div>
-            ))}
-          </Column>
+        {shopifyErrors.length > 0 && (
+          <div className="row wrap" style={{ gap: 10, background: "var(--amber-soft)", color: "var(--amber-ink)", borderRadius: 12, padding: "10px 14px", flex: "none" }}>
+            <Icon name="info" />
+            <span className="grow small"><b>{shopifyErrors.length}</b> handed-over order{shopifyErrors.length > 1 ? "s are" : " is"} not marked fulfilled in Shopify yet.</span>
+            <button type="button" className="btn sm" onClick={() => void syncShopify(shopifyErrors.map((p) => p.id))}>Retry Shopify</button>
+          </div>
+        )}
 
-          <Column title="Ready to hand over" count={ready4.length}>
-            {ready4.map((p) => (
-              <div key={p.id} className="card" style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, border: 0 }}>
-                <div className="row between"><span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.trk}</span><b className="xs num">{pkr(p.cod)}</b></div>
-                <div className="small">{p.customer} · <span className="muted">{p.area}</span></div>
-                <button type="button" className="btn sm" onClick={() => addToTray(p)}>Add to handover</button>
-              </div>
-            ))}
-            <div className="xs muted" style={{ padding: "0 4px" }}>Scan a box to add it to the handover on the right.</div>
-          </Column>
+        <div className="wh-cols">
+          <section className="wh-col" aria-labelledby="col-print">
+            <div className="wh-col-head">
+              <h2 id="col-print" style={{ fontSize: 14, color: "var(--ink)" }}>Print label <Count n={toLabel.length} /></h2>
+              {toLabelShown.length > 0 && (
+                <button type="button" className="btn navy sm" onClick={() => setPrinting(toLabelShown.slice(0, BATCH))}>
+                  <Icon name="printer" size={16} /> Print {Math.min(BATCH, toLabelShown.length)} label{toLabelShown.length > 1 ? "s" : ""}
+                </button>
+              )}
+            </div>
+            <div className="wh-list">
+              {toLabelShown.length === 0 && <div className="small muted" style={{ padding: 6 }}>{toLabel.length ? "No orders match the filter." : "All orders have labels."}</div>}
+              {toLabelShown.map((p) => (
+                <div key={p.id} className="wh-row">
+                  <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                    <b style={{ fontSize: 13 }}>{p.id}</b>
+                    <span className="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.customer}</span>
+                  </div>
+                  <button type="button" className="act icon-btn" aria-label={`Print label for ${p.id}`} onClick={() => setPrinting([p])} style={{ background: "var(--navy-soft)", color: "var(--navy)" }}>
+                    <Icon name="printer" size={18} />
+                  </button>
+                  <div className="sub">{p.area} · <span style={{ color: ageColor(p.createdAt) }}>{ago(p.createdAt)}</span> · {pkr(p.cod)}</div>
+                </div>
+              ))}
+            </div>
+          </section>
 
-          <Column title="Returns coming back" count={returning.length} tone="bad">
-            {returning.length === 0 && <div className="small muted" style={{ padding: 6 }}>No returns on the way.</div>}
-            {returning.map((p) => (
-              <div key={p.id} className="card" style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4, border: 0 }}>
-                <div className="row between"><span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.trk}</span><span className="xs muted">{state.riders.find((r) => r.id === p.riderId)?.name}</span></div>
-                <div className="small muted">{p.attempt?.reason}</div>
-                {p.flags.length > 0 && <span className="flag" style={{ alignSelf: "flex-start" }}>Flagged · check box condition</span>}
-                <button type="button" className="btn sm" onClick={() => { const r = receiveReturn(p.trk); toast(r.message, r.ok ? "good" : "bad"); }}>Check in</button>
-              </div>
-            ))}
-          </Column>
+          <section className="wh-col" aria-labelledby="col-ready">
+            <div className="wh-col-head">
+              <h2 id="col-ready" style={{ fontSize: 14, color: "var(--ink)" }}>Ready to hand over <Count n={ready4.length} /></h2>
+            </div>
+            <div className="wh-list">
+              {ready4.length === 0 && <div className="small muted" style={{ padding: 6 }}>Nothing waiting.</div>}
+              {ready4.map((p) => (
+                <div key={p.id} className="wh-row">
+                  <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                    <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.trk}</span>
+                    <span className="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.customer}</span>
+                  </div>
+                  <button type="button" className="act btn sm" onClick={() => addToTray(p)}>Add</button>
+                  <div className="sub">{p.area} · {pkr(p.cod)}</div>
+                </div>
+              ))}
+            </div>
+            <div className="xs muted" style={{ padding: "0 4px" }}>Scan a box (or press Add) to put it in the handover.</div>
+          </section>
+
+          <section className="wh-col bad" aria-labelledby="col-ret">
+            <div className="wh-col-head">
+              <h2 id="col-ret" style={{ fontSize: 14, color: "var(--red)" }}>Returns coming back <Count n={returning.length} bad /></h2>
+            </div>
+            <div className="wh-list">
+              {returning.length === 0 && <div className="small muted" style={{ padding: 6 }}>No returns on the way.</div>}
+              {returning.map((p) => (
+                <div key={p.id} className="wh-row">
+                  <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                    <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.trk}</span>
+                    {p.flags.length > 0 && <span className="flag">Flagged</span>}
+                  </div>
+                  <button type="button" className="act btn sm" onClick={() => { const r = receiveReturn(p.trk); toast(r.message, r.ok ? "good" : "bad"); }}>Check in</button>
+                  <div className="sub">{state.riders.find((r) => r.id === p.riderId)?.name} · {p.attempt?.reason}</div>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       </main>
 
-      <aside style={{ flex: "1 1 320px", maxWidth: 420, background: "#fff", borderLeft: "1px solid var(--line)", padding: 18, display: "flex", flexDirection: "column", gap: 14 }}>
-        <h2>Handover</h2>
-        <div className="small muted">Pick the rider, scan each box, then confirm. The rider must scan every box again before the ride starts.</div>
-        <div className="stack" style={{ gap: 8 }}>
+      <aside className="wh-side" aria-labelledby="ho-title">
+        <h2 id="ho-title">Handover</h2>
+        <div className="xs muted">Pick the rider, scan each box, then confirm. The Shopify order is marked fulfilled at handover.</div>
+        <div className="wh-riders">
           {state.riders.map((r) => (
             <button
               key={r.id}
@@ -216,7 +287,7 @@ export default function WarehouseDesk() {
               aria-pressed={riderId === r.id}
               onClick={() => { setRiderId(r.id); setTray([]); setBanner(null); input.current?.focus(); }}
               className="row"
-              style={{ gap: 10, textAlign: "left", border: riderId === r.id ? "2px solid var(--navy)" : "1px solid var(--line)", background: riderId === r.id ? "var(--navy-soft)" : "#fff", borderRadius: 12, padding: "8px 12px", minHeight: 52, cursor: "pointer" }}
+              style={{ gap: 10, textAlign: "left", border: riderId === r.id ? "2px solid var(--navy)" : "1px solid var(--line)", background: riderId === r.id ? "var(--navy-soft)" : "#fff", borderRadius: 12, padding: "6px 10px", minHeight: 48, cursor: "pointer", flex: "none" }}
             >
               <span className="avatar">{initials(r.name)}</span>
               <span className="grow">
@@ -225,13 +296,17 @@ export default function WarehouseDesk() {
               </span>
             </button>
           ))}
+          {state.riders.length === 0 && <div className="xs muted">No riders yet. The admin adds them on the Staff page.</div>}
         </div>
-        <div className="stack" style={{ gap: 8, borderTop: "1px solid #eef1f5", paddingTop: 12 }}>
-          <div className="row between small"><b>In this handover</b><span className="muted num">{tray.length} box{tray.length === 1 ? "" : "es"} · {pkr(trayTotal)}</span></div>
+        <div className="row between small" style={{ borderTop: "1px solid #eef1f5", paddingTop: 10, flex: "none" }}>
+          <b>In this handover</b>
+          <span className="muted num">{tray.length} box{tray.length === 1 ? "" : "es"} · {pkr(trayTotal)}</span>
+        </div>
+        <div className="wh-tray">
           {trayParcels.length === 0 && <div className="xs muted">Nothing scanned yet.</div>}
           {trayParcels.map((p) => (
-            <div key={p.trk} className="row between tile">
-              <span>
+            <div key={p.trk} className="row between tile" style={{ flex: "none", padding: "6px 10px" }}>
+              <span style={{ minWidth: 0 }}>
                 <span className="mono" style={{ display: "block", fontSize: 12.5, fontWeight: 600 }}>{p.trk}</span>
                 <span className="xs muted" style={{ display: "block" }}>{p.area}</span>
               </span>
@@ -244,35 +319,38 @@ export default function WarehouseDesk() {
             </div>
           ))}
         </div>
-        <button type="button" className="btn red xl" disabled={!rider || tray.length === 0} onClick={confirmHandover} style={{ marginTop: "auto" }}>
+        <button type="button" className="btn red xl" disabled={!rider || tray.length === 0} onClick={confirmHandover} style={{ flex: "none" }}>
           {rider ? `Confirm handover to ${rider.name.split(" ")[0]} (${tray.length})` : "Pick a rider"}
         </button>
         {rider && (
-          <button type="button" className="btn" onClick={() => setCashFor(rider.id)}>
-            <Icon name="cash" size={18} /> Receive cash from {rider.name.split(" ")[0]} · {pkr(cashInHand(state, rider.id).inHand)}
+          <button type="button" className="btn" onClick={() => setCashFor(rider.id)} style={{ flex: "none" }}>
+            <Icon name="cash" size={18} /> Receive cash · {pkr(cashInHand(state, rider.id).inHand)}
           </button>
         )}
-        {state.riders.length === 0 && <div className="xs muted">No riders yet. The admin adds them on the Staff page.</div>}
       </aside>
 
-      {labelFor && (
-        <div className="overlay" onClick={(e) => e.target === e.currentTarget && setLabelFor(null)}>
-          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="lbl-title">
-            <h2 id="lbl-title">Shipping label · {labelFor.id}</h2>
-            <div className="print-area"><LabelSheet p={labelFor} /></div>
-            <div className="xs muted">Print on a 4 × 6 thermal label and paste it on the box. The rider scans this QR to take the parcel.</div>
-            <div className="row wrap" style={{ justifyContent: "flex-end" }}>
-              <button type="button" className="btn" onClick={() => window.print()}><Icon name="printer" size={16} /> Print</button>
-              {labelFor.status === "new" ? (
-                <button type="button" className="btn navy" onClick={() => { printLabel(labelFor.id); toast(`Label for ${labelFor.id} done. It's ready to hand over.`, "good"); setLabelFor(null); input.current?.focus(); }}>
-                  Label printed and pasted
-                </button>
-              ) : (
-                <button type="button" className="btn navy" onClick={() => setLabelFor(null)}>Close</button>
-              )}
+      {printing && (
+        <>
+          <PrintLabels parcels={printing} />
+          <div className="overlay" onClick={(e) => e.target === e.currentTarget && setPrinting(null)}>
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="lbl-title" style={{ width: "min(520px, 100%)" }}>
+              <h2 id="lbl-title">{printing.length === 1 ? `Shipping label · ${printing[0].id}` : `${printing.length} shipping labels`}</h2>
+              <div className="scroll-box" style={{ maxHeight: "50vh", display: "flex", flexDirection: "column", gap: 12, alignItems: "center", background: "var(--ground)", borderRadius: 10, padding: 10 }}>
+                {printing.map((p) => <LabelSheet key={p.id} p={p} />)}
+              </div>
+              <div className="xs muted">One label per page on a 4 × 6 thermal printer. Paste each on its box.</div>
+              <div className="row wrap" style={{ justifyContent: "flex-end" }}>
+                <button type="button" className="btn" onClick={() => setPrinting(null)}>Close</button>
+                <button type="button" className="btn" onClick={() => window.print()}><Icon name="printer" size={16} /> Print</button>
+                {printing.some((p) => p.status === "new") && (
+                  <button type="button" className="btn navy" onClick={() => markPrinted(printing)}>
+                    {printing.length === 1 ? "Label printed and pasted" : `Mark ${printing.length} as printed`}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        </>
       )}
 
       {cashFor && (() => {
@@ -285,7 +363,7 @@ export default function WarehouseDesk() {
               <div className="small muted">Count the cash from the rider. The app expects:</div>
               <div className="num" style={{ fontSize: 30, fontWeight: 700 }}>{pkr(amount)}</div>
               <div className="xs muted">COD from today&apos;s deliveries minus what the rider already deposited today.</div>
-              <div className="row" style={{ justifyContent: "flex-end" }}>
+              <div className="row wrap" style={{ justifyContent: "flex-end" }}>
                 <button type="button" className="btn" onClick={() => setCashFor(null)}>Cancel</button>
                 <button
                   type="button"
@@ -304,14 +382,10 @@ export default function WarehouseDesk() {
   );
 }
 
-function Column({ title, count, tone, children }: { title: string; count: number; tone?: "bad"; children: React.ReactNode }) {
+function Count({ n, bad }: { n: number; bad?: boolean }) {
   return (
-    <section style={{ background: tone === "bad" ? "#fbedec" : "#ebeff4", borderRadius: 14, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div className="row between" style={{ padding: "2px 4px" }}>
-        <h2 style={{ fontSize: 14, color: tone === "bad" ? "var(--red)" : "var(--ink)" }}>{title}</h2>
-        <span className="xs" style={{ fontWeight: 600, background: "#fff", color: tone === "bad" ? "var(--red)" : "var(--ink)", borderRadius: 99, padding: "2px 9px" }}>{count}</span>
-      </div>
-      {children}
-    </section>
+    <span className="xs" style={{ marginLeft: 6, fontWeight: 600, background: "#fff", color: bad ? "var(--red)" : "var(--ink)", borderRadius: 99, padding: "2px 9px", verticalAlign: "middle" }}>
+      {n}
+    </span>
   );
 }

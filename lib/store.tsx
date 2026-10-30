@@ -30,7 +30,10 @@ interface Store {
   reload: () => Promise<void>;
   addTestOrder: () => void;
   printLabel: (id: string) => void;
-  handover: (riderId: string, trks: string[]) => void;
+  printLabels: (ids: string[]) => void;
+  /** Returns the ids of the parcels that were handed over. */
+  handover: (riderId: string, trks: string[]) => string[];
+  adminSetOutcome: (id: string, outcome: "delivered" | "returned", reason?: ReturnReason, note?: string) => Result;
   receiveReturn: (trk: string) => Result;
   startRide: (code: string, riderId: string, manual: boolean) => Result;
   logCall: (id: string) => void;
@@ -319,18 +322,59 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           p.events.push({ at: Date.now(), what: "Label printed and pasted on box", by: actor() });
         }),
 
+      printLabels: (ids) =>
+        mutate((s) => {
+          const at = Date.now();
+          s.parcels.forEach((p) => {
+            if (ids.includes(p.id) && p.status === "new") {
+              p.status = "labeled";
+              p.events.push({ at, what: "Label printed and pasted on box", by: actor() });
+            }
+          });
+        }),
+
       handover: (riderId, trks) =>
         mutate((s) => {
           const name = riderName(s, riderId);
           const at = Date.now();
+          const ids: string[] = [];
           s.parcels.forEach((p) => {
             if (trks.includes(p.trk) && p.status === "labeled") {
               p.status = "handed";
               p.riderId = riderId;
               p.events.push({ at, what: `Handed to ${name}`, by: actor() });
+              ids.push(p.id);
             }
           });
+          return ids;
         }),
+
+      adminSetOutcome: (id, outcome, reason, note) => {
+        const p0 = ref.current.parcels.find((x) => x.id === id);
+        if (!p0) return { ok: false, message: "Parcel not found." };
+        if (!["handed", "out", "delivered", "returned"].includes(p0.status))
+          return { ok: false, message: "Only parcels already handed to a rider can be marked." };
+        mutate((s) => {
+          const p = s.parcels.find((x) => x.id === id)!;
+          const at = Date.now();
+          p.status = outcome;
+          p.attempt = {
+            outcome,
+            at,
+            reason: outcome === "returned" ? reason ?? "Customer not available" : undefined,
+            calls: p.calls.length,
+            distanceM: p.attempt?.distanceM ?? 0,
+            photo: p.attempt?.photo,
+            manualScan: !!p.manualScan,
+            byAdmin: actor(),
+            note: note || undefined,
+          };
+          p.flags = [];
+          const what = outcome === "delivered" ? "Marked delivered by admin" : `Marked returned by admin: ${p.attempt.reason}`;
+          p.events.push({ at, what: note ? `${what} · "${note}"` : what, by: actor(), kind: outcome === "delivered" ? "good" : "bad" });
+        });
+        return { ok: true, message: outcome === "delivered" ? `${p0.id} marked delivered.` : `${p0.id} marked returned.` };
+      },
 
       receiveReturn: (trk) => {
         const p0 = ref.current.parcels.find((x) => x.trk.toUpperCase() === trk.toUpperCase());

@@ -58,7 +58,7 @@ export default function CashPage() {
           <Icon name="chevron" size={18} />
         </button>
 
-        <section className="card" style={{ padding: "6px 14px", borderRadius: 14 }}>
+        <section className="card scroll-box" style={{ padding: "6px 14px", borderRadius: 14, maxHeight: "55vh" }}>
           <div className="row between" style={{ padding: "8px 0", alignItems: "baseline" }}>
             <h2 style={{ fontSize: 14 }}>Today&apos;s activity</h2>
             <span className="xs muted">Newest first</span>

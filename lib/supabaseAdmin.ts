@@ -11,13 +11,19 @@ export function adminClient(): SupabaseClient {
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
-/** Returns the signed-in admin's user id from the request's bearer token, or null. */
-export async function requireAdmin(req: Request): Promise<{ userId: string } | null> {
+/** Returns the signed-in staff member from the request's bearer token when their role is allowed, or null. */
+export async function requireRole(req: Request, roles: string[]): Promise<{ userId: string; role: string; name: string } | null> {
   const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   if (!token) return null;
   const admin = adminClient();
   const { data, error } = await admin.auth.getUser(token);
   if (error || !data.user) return null;
-  const { data: staff } = await admin.from("staff").select("role").eq("user_id", data.user.id).maybeSingle();
-  return staff?.role === "admin" ? { userId: data.user.id } : null;
+  const { data: staff } = await admin.from("staff").select("role,name").eq("user_id", data.user.id).maybeSingle();
+  if (!staff || !roles.includes(staff.role)) return null;
+  return { userId: data.user.id, role: staff.role, name: staff.name || data.user.email || "Staff" };
+}
+
+/** Returns the signed-in admin's user id from the request's bearer token, or null. */
+export async function requireAdmin(req: Request): Promise<{ userId: string } | null> {
+  return requireRole(req, ["admin"]);
 }

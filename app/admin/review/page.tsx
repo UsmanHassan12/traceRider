@@ -36,7 +36,7 @@ function Review() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100dvh" }}>
-      <header className="row between wrap" style={{ background: "#fff", borderBottom: "1px solid var(--line)", padding: "14px 28px", gap: 12 }}>
+      <header className="row between wrap" style={{ background: "#fff", borderBottom: "1px solid var(--line)", padding: "14px clamp(16px, 3vw, 28px)", gap: 12 }}>
         <nav aria-label="Breadcrumb" className="row small muted" style={{ gap: 8 }}>
           <Link href="/admin" style={{ textDecoration: "none" }}>Overview</Link><span>/</span><span>Returns review</span>
           {p && (<><span>/</span><b className="mono" style={{ color: "var(--ink)" }}>{p.trk}</b></>)}
@@ -44,8 +44,8 @@ function Review() {
         <span className="small muted">{flagged.length} flagged today · {done.length} reviewed</span>
       </header>
 
-      <div className="row wrap" style={{ gap: 16, padding: "20px 28px 40px", alignItems: "flex-start", maxWidth: 1440 }}>
-        <section aria-label="Review queue" className="card" style={{ flex: "1 1 260px", minWidth: 0, padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+      <div className="row wrap" style={{ gap: 16, padding: "20px clamp(16px, 3vw, 28px) 40px", alignItems: "flex-start", maxWidth: 1440 }}>
+        <section aria-label="Review queue" className="card scroll-box" style={{ flex: "1 1 260px", minWidth: 0, padding: 8, display: "flex", flexDirection: "column", gap: 2, maxHeight: "min(640px, 70vh)" }}>
           <div className="row" style={{ gap: 6, padding: 8 }}>
             <button type="button" className="chip" aria-pressed={tab === "open"} onClick={() => setTab("open")}>To review {open.length}</button>
             <button type="button" className="chip" aria-pressed={tab === "done"} onClick={() => setTab("done")}>Done {done.length}</button>

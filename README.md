@@ -73,6 +73,22 @@ To show the dashboard before real orders arrive, use **Load sample day** on the 
 COD amount = the order's outstanding amount (0 for prepaid orders). The map pin comes from the shipping address
 when Shopify has one; without it the location check is skipped and noted on the parcel.
 
+### Only confirmed orders from Islamabad and Rawalpindi
+
+- An order comes into the app only when it has the **`order_confirmed`** tag (setting `SHOPIFY_CONFIRMED_TAG`)
+  and ships to **Islamabad or Rawalpindi** (setting `ALLOWED_CITIES`). Everything else is ignored.
+- The tag is usually added after the COD confirmation call, so also create **Order update** and
+  **Order cancellation** webhooks (same URL). An order cancelled before handover is removed from the warehouse list.
+
+### Mark Shopify orders fulfilled at handover
+
+1. Supabase › SQL Editor: run `supabase/migrations/002_shopify_sync.sql` once.
+2. Dev Dashboard › your app › **Versions**: scopes `read_orders`, `read_merchant_managed_fulfillment_orders`,
+   `write_merchant_managed_fulfillment_orders` → release → install / update on the store.
+3. Vercel env: `SHOPIFY_STORE_DOMAIN` (xxx.myshopify.com), `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET` → Redeploy.
+4. When the warehouse confirms a handover, each Shopify order is fulfilled with the parcel code as tracking number.
+   Failures show on the warehouse desk and in Admin › Orders with a **Retry Shopify** button.
+
 ## Daily flow
 
 1. **Warehouse**: Print label → paste on box → pick rider → scan boxes into the handover → Confirm handover.

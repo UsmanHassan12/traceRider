@@ -47,7 +47,9 @@ create table if not exists public.parcels (
   attempt           jsonb,                                 -- delivered / returned proof
   flags             text[] not null default '{}',
   review            jsonb,                                 -- admin decision on a flagged return
-  is_sample         boolean not null default false
+  is_sample         boolean not null default false,
+  shopify_sync      text,                                  -- null, 'fulfilled', or 'error: …'
+  shopify_synced_at timestamptz
 );
 
 -- Append-only custody log. Every handover, scan, call and outcome is a row here.

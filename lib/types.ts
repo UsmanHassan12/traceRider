@@ -31,6 +31,8 @@ export interface Attempt {
   otpOk?: boolean;
   manualScan: boolean;
   customerReply?: string;
+  byAdmin?: string; // set when an admin recorded the outcome instead of the rider
+  note?: string;
 }
 
 export type ReviewDecision = "rider" | "customer" | "check";
@@ -55,6 +57,8 @@ export interface Parcel {
   lat: number | null; // from Shopify shipping address; null when Shopify has no map pin
   lng: number | null;
   isSample?: boolean;
+  shopifyOrderId?: string; // set for real Shopify orders (read-only in the app)
+  shopifySync?: string; // "fulfilled" or "error: …" (written by the server)
   status: ParcelStatus;
   riderId?: string;
   createdAt: number;

@@ -75,7 +75,7 @@ export default function AdminOverview() {
   const big = { fontSize: 30, fontWeight: 700, lineHeight: 1 };
 
   return (
-    <main style={{ padding: "26px 32px 48px", display: "flex", flexDirection: "column", gap: 22, maxWidth: 1240 }}>
+    <main className="adm-main">
       <div className="row between wrap" style={{ alignItems: "flex-end", gap: 14 }}>
         <div>
           <div className="small muted">{new Date().toLocaleDateString("en-PK", { weekday: "long", day: "numeric", month: "long" })}</div>
