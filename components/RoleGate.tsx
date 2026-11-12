@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingScreen } from "./LoadingScreen";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
@@ -16,7 +17,7 @@ export function RoleGate({ roles, children }: { roles: Role[]; children: React.R
   }, [configured, ready, session, router]);
 
   if (!configured) return <SetupNeeded />;
-  if (!ready || !session) return <div aria-busy="true" style={{ minHeight: "100dvh" }} />;
+  if (!ready || !session) return <LoadingScreen />;
 
   if (!me) {
     return (

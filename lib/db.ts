@@ -47,10 +47,17 @@ export interface RiderRow {
 }
 
 export interface DepositRow {
+  id?: number;
   rider_id: string;
   amount: number | string;
   at: string;
   by: string;
+  request_id?: string | null;
+  declared?: number | string | null;
+  status?: string | null;
+  rider_note?: string | null;
+  confirmed_at?: string | null;
+  resolved_by?: string | null;
 }
 
 const ms = (s: string | null | undefined) => (s ? Date.parse(s) : undefined);
@@ -108,6 +115,7 @@ export function fromParcel(p: Parcel): ParcelRow {
     flags: p.flags,
     review: p.review ?? null,
     is_sample: !!p.isSample,
+    shopify_order_id: p.shopifyOrderId ?? null,
   };
 }
 
@@ -128,9 +136,29 @@ export const fromEvent = (parcelId: string, e: CustodyEvent): EventRow => ({
 
 export const toRider = (r: RiderRow): Rider => ({ id: r.id, name: r.name, phone: r.phone, bike: r.bike, licence: r.licence });
 
-export const toDeposit = (r: DepositRow): Deposit => ({ riderId: r.rider_id, amount: Number(r.amount) || 0, at: Date.parse(r.at), by: r.by });
+export const toDeposit = (r: DepositRow): Deposit => ({
+  id: r.id,
+  riderId: r.rider_id,
+  amount: Number(r.amount) || 0,
+  at: Date.parse(r.at),
+  by: r.by,
+  requestId: r.request_id ?? undefined,
+  declared: r.declared === null || r.declared === undefined ? undefined : Number(r.declared),
+  status: (r.status as Deposit["status"]) ?? "confirmed",
+  riderNote: r.rider_note ?? undefined,
+  confirmedAt: r.confirmed_at ? Date.parse(r.confirmed_at) : undefined,
+  resolvedBy: r.resolved_by ?? undefined,
+});
 
-export const fromDeposit = (d: Deposit): DepositRow => ({ rider_id: d.riderId, amount: d.amount, at: new Date(d.at).toISOString(), by: d.by });
+/** New deposit row. Handover fields are left out when unset, so older databases still accept it. */
+export const fromDeposit = (d: Deposit): DepositRow => {
+  const row: DepositRow = { rider_id: d.riderId, amount: d.amount, at: new Date(d.at).toISOString(), by: d.by };
+  if (d.requestId) row.request_id = d.requestId;
+  if (d.declared !== undefined) row.declared = d.declared;
+  if (d.status) row.status = d.status;
+  if (d.confirmedAt) row.confirmed_at = new Date(d.confirmedAt).toISOString();
+  return row;
+};
 
 /** Same-moment events are the same event (used to drop our own realtime echoes). */
 export const sameEvent = (a: CustodyEvent, b: CustodyEvent) => a.at === b.at && a.what === b.what;

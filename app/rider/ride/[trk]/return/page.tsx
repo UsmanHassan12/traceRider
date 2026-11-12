@@ -10,6 +10,7 @@ import { useToast } from "@/components/Toast";
 import { fmtDistance, time } from "@/lib/format";
 import { RULES } from "@/lib/rules";
 import type { ReturnReason } from "@/lib/types";
+import { storeProof } from "@/lib/photos";
 import { useDistance } from "@/lib/useDistance";
 import { useRider } from "@/lib/useRider";
 
@@ -34,9 +35,10 @@ export default function ReturnPage() {
   const router = useRouter();
   const toast = useToast();
   const p = state.parcels.find((x) => x.trk === code);
-  const { distance, gps, gpsError, demo, setDemo, isDemo, noPin } = useDistance(p?.lat ?? null, p?.lng ?? null);
+  const { distance, gps, here, gpsError, demo, setDemo, isDemo, noPin } = useDistance(p?.lat ?? null, p?.lng ?? null);
   const [reason, setReason] = useState<ReturnReason | null>(null);
   const [photo, setPhoto] = useState<string | undefined>();
+  const [saving, setSaving] = useState(false);
 
   if (!rider) return null;
   if (!p || p.riderId !== rider.id || p.status !== "out") {
@@ -50,14 +52,17 @@ export default function ReturnPage() {
 
   const callsOk = p.calls.length >= RULES.minCalls;
   const photoOk = !RULES.photoRequired || !!photo;
-  const near = noPin || (distance !== null && distance <= RULES.maxDistanceM);
+  const near = noPin ? !!here || isDemo : distance !== null && distance <= RULES.maxDistanceM;
   const dest = p.lat !== null && p.lng !== null ? `${p.lat},${p.lng}` : encodeURIComponent(p.address);
   const passed = [!!reason, callsOk, photoOk, near].filter(Boolean).length;
   const canSave = RULES.mode === "flag" ? !!reason : passed === 4;
 
-  function save() {
+  async function save() {
     if (!reason) return;
-    const r = markReturn(p!.id, { reason, distanceM: noPin ? -1 : distance ?? 99999, photo });
+    setSaving(true);
+    const stored = await storeProof(p!.id, photo);
+    setSaving(false);
+    const r = markReturn(p!.id, { reason, distanceM: noPin ? -1 : distance ?? 99999, photo: stored, where: here ?? undefined });
     if (!r.ok) return toast(r.message, "bad");
     toast(r.message, r.flags && r.flags.length ? "bad" : "good");
     router.replace("/rider");
@@ -110,7 +115,9 @@ export default function ReturnPage() {
             <div className="grow">
               <div style={{ fontWeight: 600, color: near ? undefined : "var(--red)" }}>
                 {noPin
-                  ? "This address has no map pin, so location isn't checked"
+                  ? here
+                    ? "Location recorded (this address has no map pin to compare)"
+                    : gpsError ?? "Finding your location…"
                   : distance === null
                     ? gpsError ?? "Finding your location…"
                     : near
@@ -128,7 +135,7 @@ export default function ReturnPage() {
           {isDemo && <DemoDistance value={demo} onChange={setDemo} gps={gps} />}
         </section>
 
-        <button type="button" className="btn red xl" disabled={!canSave} onClick={save} style={{ marginTop: 6 }}>
+        <button type="button" className="btn red xl" disabled={!canSave || saving} onClick={save} style={{ marginTop: 6 }}>
           {canSave ? "Confirm return" : `Confirm return · ${passed} of 4 checks`}
         </button>
       </div>

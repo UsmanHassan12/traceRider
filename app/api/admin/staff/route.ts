@@ -84,7 +84,11 @@ export async function DELETE(req: Request) {
   const { userId } = (await req.json()) as { userId?: string };
   if (!userId) return bad("Missing user.");
   if (userId === caller.userId) return bad("You can't remove your own login.");
-  const { error } = await adminClient().auth.admin.deleteUser(userId);
+  const admin = adminClient();
+  const { data: staff } = await admin.from("staff").select("rider_id").eq("user_id", userId).maybeSingle();
+  const { error } = await admin.auth.admin.deleteUser(userId);
   if (error) return bad(error.message, 500);
+  // keep the rider's history but take them off the handover list
+  if (staff?.rider_id) await admin.from("riders").update({ active: false }).eq("id", staff.rider_id);
   return NextResponse.json({ ok: true });
 }

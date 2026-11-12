@@ -1,5 +1,6 @@
 "use client";
 
+import { Pager, usePaged } from "@/components/Pager";
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { useToast } from "@/components/Toast";
@@ -74,6 +75,7 @@ export default function StaffPage() {
     void refresh();
   }
 
+  const pgL = usePaged(logins ?? [], 12);
   const linked = new Set((logins ?? []).map((l) => l.riderId).filter(Boolean));
   const unlinkedRiders = state.riders.filter((r) => !linked.has(r.id));
   const hasSample = state.parcels.some((p) => p.isSample);
@@ -94,7 +96,7 @@ export default function StaffPage() {
             <table className="data" style={{ minWidth: 520 }}>
               <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Rider</th><th /></tr></thead>
               <tbody>
-                {(logins ?? []).map((l) => (
+                {pgL.rows.map((l) => (
                   <tr key={l.userId}>
                     <td><b>{l.name || "—"}</b></td>
                     <td className="small">{l.email}</td>
@@ -112,6 +114,7 @@ export default function StaffPage() {
               </tbody>
             </table>
           </div>
+          <Pager {...pgL} label="logins" />
         </section>
 
         <form onSubmit={create} className="card pad-lg stack" style={{ flex: "2 1 320px", minWidth: 0 }}>

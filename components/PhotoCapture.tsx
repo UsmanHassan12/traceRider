@@ -1,5 +1,7 @@
 "use client";
 
+import { usePhotoUrl } from "@/lib/photos";
+
 /** Opens the rear camera (on phones) and returns a small JPEG data URL stamped with time. */
 export function PhotoCapture({ value, onChange, id }: { value?: string; onChange: (dataUrl: string | undefined) => void; id: string }) {
   function handle(file: File) {
@@ -52,8 +54,14 @@ export function PhotoCapture({ value, onChange, id }: { value?: string; onChange
 }
 
 export function PhotoThumb({ src, size = 52 }: { src?: string; size?: number }) {
+  const url = usePhotoUrl(src === "seed" ? undefined : src);
   if (!src) return <span className="xs muted">No photo</span>;
   if (src === "seed")
     return <div style={{ width: size, height: size, borderRadius: 8, background: "#c9b79c", display: "grid", placeItems: "center", fontSize: 10, color: "#4a3a24" }}>Photo</div>;
-  return <img src={src} alt="Doorstep photo" style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", display: "block" }} />;
+  if (!url) return <div aria-busy="true" style={{ width: size, height: size, borderRadius: 8, background: "var(--ground)" }} />;
+  return (
+    <a href={url} target="_blank" rel="noreferrer" title="Open full photo">
+      <img src={url} alt="Doorstep photo" style={{ width: size, height: size, borderRadius: 8, objectFit: "cover", display: "block" }} />
+    </a>
+  );
 }

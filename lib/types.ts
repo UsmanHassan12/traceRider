@@ -32,6 +32,7 @@ export interface Attempt {
   manualScan: boolean;
   customerReply?: string;
   byAdmin?: string; // set when an admin recorded the outcome instead of the rider
+  where?: { lat: number; lng: number; acc: number }; // rider's phone position when the outcome was marked
   note?: string;
 }
 
@@ -79,11 +80,20 @@ export interface Rider {
   licence: string;
 }
 
+export type DepositStatus = "pending" | "confirmed" | "disputed" | "resolved";
+
 export interface Deposit {
+  id?: number; // set once saved
   riderId: string;
-  amount: number;
+  amount: number; // what the warehouse counted
   at: number;
   by: string;
+  requestId?: string; // one-time code from the rider's QR
+  declared?: number; // what the rider said they were handing in
+  status?: DepositStatus; // pending = waiting for the rider to accept or dispute
+  riderNote?: string;
+  confirmedAt?: number;
+  resolvedBy?: string;
 }
 
 export type Role = "admin" | "warehouse" | "rider";

@@ -4,7 +4,10 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { LabelSheet } from "@/components/LabelSheet";
+import { Pager, usePaged } from "@/components/Pager";
 import { PrintLabels } from "@/components/PrintLabels";
+import { QrScanner } from "@/components/QrScanner";
+import { LoadingScreen } from "@/components/LoadingScreen";
 import { useToast } from "@/components/Toast";
 import { fulfillInShopify } from "@/lib/api";
 import { ago, initials, pkr, time } from "@/lib/format";
@@ -14,16 +17,19 @@ import type { Parcel } from "@/lib/types";
 type Banner = { tone: "good" | "bad"; title: string; sub?: string; undo?: () => void } | null;
 
 const BATCH = 50; // labels per print run
+const PAGE = 12; // rows per page in each column
 
 export default function WarehouseDesk() {
-  const { ready, state, me, addTestOrder, printLabel, printLabels, handover, receiveReturn, deposit, signOut } = useStore();
+  const { ready, state, me, addTestOrder, printLabel, printLabels, handover, receiveReturn, takeBack, deposit, signOut } = useStore();
   const toast = useToast();
   const [code, setCode] = useState("");
   const [riderId, setRiderId] = useState<string | null>(null);
   const [tray, setTray] = useState<string[]>([]);
   const [banner, setBanner] = useState<Banner>(null);
   const [printing, setPrinting] = useState<Parcel[] | null>(null);
-  const [cashFor, setCashFor] = useState<string | null>(null);
+  const [cashFor, setCashFor] = useState<{ riderId: string; requestId?: string; declared?: number } | null>(null);
+  const [camOpen, setCamOpen] = useState(false);
+  const [cashCount, setCashCount] = useState("");
   const [q, setQ] = useState("");
   const input = useRef<HTMLInputElement>(null);
 
@@ -31,9 +37,6 @@ export default function WarehouseDesk() {
     if (ready && !riderId && state.riders[0]) setRiderId(state.riders[0].id);
   }, [ready, riderId, state.riders]);
 
-  if (!ready) return <div aria-busy="true" />;
-
-  const rider = state.riders.find((r) => r.id === riderId) ?? null;
   const match = (p: Parcel) => {
     const s = q.trim().toLowerCase();
     return !s || [p.id, p.trk, p.customer, p.area, p.phone].some((x) => x.toLowerCase().includes(s));
@@ -41,7 +44,14 @@ export default function WarehouseDesk() {
   const toLabel = state.parcels.filter((p) => p.status === "new").sort((a, b) => a.createdAt - b.createdAt);
   const toLabelShown = toLabel.filter(match);
   const ready4 = state.parcels.filter((p) => p.status === "labeled" && !tray.includes(p.trk)).filter(match);
-  const returning = state.parcels.filter((p) => p.status === "returned").sort((a, b) => (a.attempt?.at ?? 0) - (b.attempt?.at ?? 0));
+  const returning = state.parcels.filter((p) => p.status === "returned").filter(match).sort((a, b) => (a.attempt?.at ?? 0) - (b.attempt?.at ?? 0));
+  const pgLabel = usePaged(toLabelShown, PAGE, q);
+  const pgReady = usePaged(ready4, PAGE, q);
+  const pgRet = usePaged(returning, PAGE, q);
+
+  if (!ready) return <LoadingScreen />;
+
+  const rider = state.riders.find((r) => r.id === riderId) ?? null;
   const trayParcels = tray.map((t) => state.parcels.find((p) => p.trk === t)).filter((p): p is Parcel => !!p);
   const trayTotal = trayParcels.reduce((s, p) => s + p.cod, 0);
   const shopifyErrors = state.parcels.filter((p) => p.shopifySync?.startsWith("error") && ["handed", "out"].includes(p.status));
@@ -71,14 +81,26 @@ export default function WarehouseDesk() {
     e.preventDefault();
     const raw = code.trim();
     setCode("");
+    handleCode(raw);
+  }
+
+  /** One handler for the handheld scanner, the typed code and the camera. */
+  function handleCode(raw: string) {
     if (!raw) return;
     if (raw.startsWith("DEPOSIT|")) {
-      const rid = raw.split("|")[1];
+      // DEPOSIT|<rider>|<declared amount>|<one-time code>
+      const [, rid, amt, reqId] = raw.split("|");
       if (!state.riders.some((r) => r.id === rid)) {
         setBanner({ tone: "bad", title: "Unknown rider on this cash code" });
         return;
       }
-      setCashFor(rid);
+      if (reqId && state.deposits.some((d) => d.requestId === reqId)) {
+        setBanner({ tone: "bad", title: "This cash code was already used", sub: "Ask the rider to close it and tap Hand in cash again." });
+        return;
+      }
+      const declared = Number(amt);
+      setCashCount(reqId && declared > 0 ? String(declared) : "");
+      setCashFor({ riderId: rid, requestId: reqId || undefined, declared: reqId && declared >= 0 ? declared : undefined });
       return;
     }
     const norm = raw.toUpperCase().replace(/^#/, "");
@@ -95,6 +117,12 @@ export default function WarehouseDesk() {
       return;
     }
     const who = state.riders.find((x) => x.id === p.riderId)?.name;
+    if (p.status === "handed") {
+      // the rider never scanned it and brought the box back to the desk
+      const r = takeBack(p.id);
+      setBanner({ tone: r.ok ? "good" : "bad", title: r.ok ? `${p.trk} taken back from ${who ?? "the rider"}` : r.message, sub: r.ok ? "It is back in Ready to hand over." : undefined });
+      return;
+    }
     setBanner({ tone: "bad", title: `${p.trk} can't be used here`, sub: `Status: ${p.status}${who ? ` · with ${who}` : ""}` });
   }
 
@@ -174,6 +202,9 @@ export default function WarehouseDesk() {
             <label htmlFor="wh-scan" className="sr-only">Scan a box QR or type an order number</label>
             <input ref={input} id="wh-scan" autoFocus autoComplete="off" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Scan a box QR or type an order number" style={{ flex: 1, minWidth: 0, fontSize: 16, border: 0, outline: "none", background: "transparent", minHeight: 46 }} />
             <button type="submit" className="btn navy">Enter</button>
+            <button type="button" className="btn" onClick={() => setCamOpen(true)} aria-label="Scan with camera" title="Scan with this device's camera">
+              <Icon name="camera" size={18} /> <span className="hide-sm">Camera</span>
+            </button>
           </form>
           <div className="row" style={{ gap: 8, background: "#fff", border: "1px solid var(--line-2)", borderRadius: 12, padding: "0 12px", minHeight: 50, flex: "1 1 220px", maxWidth: 340 }}>
             <Icon name="search" size={18} color="var(--muted)" />
@@ -220,7 +251,7 @@ export default function WarehouseDesk() {
             </div>
             <div className="wh-list">
               {toLabelShown.length === 0 && <div className="small muted" style={{ padding: 6 }}>{toLabel.length ? "No orders match the filter." : "All orders have labels."}</div>}
-              {toLabelShown.map((p) => (
+              {pgLabel.rows.map((p) => (
                 <div key={p.id} className="wh-row">
                   <div className="row" style={{ gap: 8, minWidth: 0 }}>
                     <b style={{ fontSize: 13 }}>{p.id}</b>
@@ -233,6 +264,7 @@ export default function WarehouseDesk() {
                 </div>
               ))}
             </div>
+            <Pager {...pgLabel} compact label="orders to label" />
           </section>
 
           <section className="wh-col" aria-labelledby="col-ready">
@@ -241,7 +273,7 @@ export default function WarehouseDesk() {
             </div>
             <div className="wh-list">
               {ready4.length === 0 && <div className="small muted" style={{ padding: 6 }}>Nothing waiting.</div>}
-              {ready4.map((p) => (
+              {pgReady.rows.map((p) => (
                 <div key={p.id} className="wh-row">
                   <div className="row" style={{ gap: 8, minWidth: 0 }}>
                     <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.trk}</span>
@@ -252,6 +284,7 @@ export default function WarehouseDesk() {
                 </div>
               ))}
             </div>
+            <Pager {...pgReady} compact label="ready parcels" />
             <div className="xs muted" style={{ padding: "0 4px" }}>Scan a box (or press Add) to put it in the handover.</div>
           </section>
 
@@ -261,7 +294,7 @@ export default function WarehouseDesk() {
             </div>
             <div className="wh-list">
               {returning.length === 0 && <div className="small muted" style={{ padding: 6 }}>No returns on the way.</div>}
-              {returning.map((p) => (
+              {pgRet.rows.map((p) => (
                 <div key={p.id} className="wh-row">
                   <div className="row" style={{ gap: 8, minWidth: 0 }}>
                     <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.trk}</span>
@@ -272,6 +305,7 @@ export default function WarehouseDesk() {
                 </div>
               ))}
             </div>
+            <Pager {...pgRet} compact label="returns" />
           </section>
         </div>
       </main>
@@ -323,7 +357,7 @@ export default function WarehouseDesk() {
           {rider ? `Confirm handover to ${rider.name.split(" ")[0]} (${tray.length})` : "Pick a rider"}
         </button>
         {rider && (
-          <button type="button" className="btn" onClick={() => setCashFor(rider.id)} style={{ flex: "none" }}>
+          <button type="button" className="btn" onClick={() => { setCashCount(""); setCashFor({ riderId: rider.id }); }} style={{ flex: "none" }}>
             <Icon name="cash" size={18} /> Receive cash · {pkr(cashInHand(state, rider.id).inHand)}
           </button>
         )}
@@ -353,25 +387,81 @@ export default function WarehouseDesk() {
         </>
       )}
 
+      {camOpen && (
+        <div className="overlay" onClick={(e) => e.target === e.currentTarget && setCamOpen(false)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="cam-title" style={{ width: "min(460px, 100%)" }}>
+            <div className="row between">
+              <h2 id="cam-title">Scan with camera</h2>
+              <button type="button" className="icon-btn" aria-label="Close camera" onClick={() => setCamOpen(false)}><Icon name="x" size={18} /></button>
+            </div>
+            <div style={{ height: 340, borderRadius: 12, overflow: "hidden" }}>
+              <QrScanner onResult={(t) => { setCamOpen(false); handleCode(t); }} />
+            </div>
+            <div className="xs muted">Point at a box label or at the rider&apos;s cash code. It reads by itself.</div>
+          </div>
+        </div>
+      )}
+
       {cashFor && (() => {
-        const r = state.riders.find((x) => x.id === cashFor);
-        const amount = cashInHand(state, cashFor).inHand;
+        const r = state.riders.find((x) => x.id === cashFor.riderId);
+        const bal = cashInHand(state, cashFor.riderId);
+        const expected = bal.inHand;
+        const declared = cashFor.declared;
+        const counted = Math.max(0, Math.round(Number(cashCount.replace(/[^\d]/g, "")) || 0));
+        const vsDeclared = declared !== undefined ? counted - declared : counted - expected;
+        const deliveredToday = state.parcels.filter((p) => p.riderId === cashFor.riderId && p.status === "delivered" && p.attempt && new Date(p.attempt.at).toDateString() === new Date().toDateString()).length;
         return (
           <div className="overlay" onClick={(e) => e.target === e.currentTarget && setCashFor(null)}>
-            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="cash-title">
-              <h2 id="cash-title">Cash deposit · {r?.name}</h2>
-              <div className="small muted">Count the cash from the rider. The app expects:</div>
-              <div className="num" style={{ fontSize: 30, fontWeight: 700 }}>{pkr(amount)}</div>
-              <div className="xs muted">COD from today&apos;s deliveries minus what the rider already deposited today.</div>
+            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="cash-title" style={{ width: "min(500px, 100%)" }}>
+              <h2 id="cash-title">Cash handover</h2>
+              <div className="row" style={{ gap: 12, background: "var(--ground)", borderRadius: 12, padding: 12 }}>
+                <span className="avatar" style={{ width: 46, height: 46, fontSize: 15 }}>{initials(r?.name ?? "?")}</span>
+                <div className="grow">
+                  <div style={{ fontWeight: 600 }}>{r?.name}</div>
+                  <div className="xs muted">{[r?.id, r?.bike, r?.phone].filter(Boolean).join(" · ")}</div>
+                  <div className="xs muted">{deliveredToday} delivered today · {pkr(bal.collected)} COD today</div>
+                </div>
+                {cashFor.requestId ? <span className="pill good">Rider&apos;s code</span> : <span className="pill warn">No rider code</span>}
+              </div>
+              <div className="grid2">
+                <div className="tile">
+                  <div className="xs muted">{declared !== undefined ? "Rider declares" : "Rider hasn't declared"}</div>
+                  <div className="num" style={{ fontWeight: 700, fontSize: 22 }}>{declared !== undefined ? pkr(declared) : "—"}</div>
+                </div>
+                <div className="tile">
+                  <div className="xs muted">App expects</div>
+                  <div className="num" style={{ fontWeight: 700, fontSize: 22 }}>{pkr(expected)}</div>
+                </div>
+              </div>
+              {declared !== undefined && declared !== expected && (
+                <div className="xs" style={{ color: "var(--amber-ink)" }}>The rider&apos;s amount differs from the app by {pkr(Math.abs(declared - expected))}. Count carefully.</div>
+              )}
+              <div className="field">
+                <label htmlFor="cash-count">Amount you counted</label>
+                <input id="cash-count" className="input num" inputMode="numeric" autoFocus value={cashCount} onChange={(e) => setCashCount(e.target.value)} placeholder={String(declared ?? expected)} style={{ fontSize: 22, fontWeight: 600 }} />
+              </div>
+              {counted > 0 && vsDeclared !== 0 && (
+                <div className="small" style={{ color: vsDeclared < 0 ? "var(--red)" : "var(--amber-ink)" }}>
+                  {vsDeclared < 0 ? `${pkr(-vsDeclared)} less than ${declared !== undefined ? "the rider declared" : "expected"}.` : `${pkr(vsDeclared)} more than ${declared !== undefined ? "the rider declared" : "expected"}.`}{" "}
+                  The rider will be asked to accept or dispute it on their phone.
+                </div>
+              )}
+              {!cashFor.requestId && <div className="xs muted">Without the rider&apos;s code, the rider confirms the amount on their phone afterwards.</div>}
               <div className="row wrap" style={{ justifyContent: "flex-end" }}>
                 <button type="button" className="btn" onClick={() => setCashFor(null)}>Cancel</button>
                 <button
                   type="button"
                   className="btn green"
-                  disabled={amount <= 0}
-                  onClick={() => { deposit(cashFor, amount); toast(`${pkr(amount)} received from ${r?.name}.`, "good"); setCashFor(null); input.current?.focus(); }}
+                  disabled={counted <= 0}
+                  onClick={() => {
+                    const res = deposit(cashFor.riderId, counted, cashFor.requestId ? { requestId: cashFor.requestId, declared: declared ?? counted } : undefined);
+                    if (!res.ok) return toast(res.message, "bad");
+                    setBanner({ tone: "good", title: `${pkr(counted)} received from ${r?.name}`, sub: res.message });
+                    setCashFor(null);
+                    input.current?.focus();
+                  }}
                 >
-                  Cash counted, record {pkr(amount)}
+                  Mark {pkr(counted)} received
                 </button>
               </div>
             </div>

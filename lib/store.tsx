@@ -6,7 +6,7 @@ import { fromDeposit, fromEvent, fromParcel, sameEvent, toDeposit, toEvent, toPa
 import { flagsFor, NON_BLOCKING, RULES } from "./rules";
 import { makeParcel, seedState } from "./seed";
 import { configured, sb } from "./supabase";
-import type { AppState, Me, Parcel, ReturnReason, Review, Role } from "./types";
+import type { AppState, Deposit, Me, Parcel, ReturnReason, Review, Role } from "./types";
 
 /**
  * App store backed by Supabase.
@@ -25,6 +25,8 @@ interface Store {
   state: AppState;
   error: string | null;
   clearError: () => void;
+  /** Changes saved on this device that are still waiting for signal to upload. */
+  pending: number;
   signIn: (email: string, password: string) => Promise<Result>;
   signOut: () => Promise<void>;
   reload: () => Promise<void>;
@@ -34,12 +36,24 @@ interface Store {
   /** Returns the ids of the parcels that were handed over. */
   handover: (riderId: string, trks: string[]) => string[];
   adminSetOutcome: (id: string, outcome: "delivered" | "returned", reason?: ReturnReason, note?: string) => Result;
+  /** Returned parcel goes back to "Ready to hand over" with the same label. */
+  sendAgain: (id: string) => Result;
+  /** Parcel handed to a rider but not scanned yet comes back to the desk. */
+  takeBack: (id: string) => Result;
+  /** Admin: delete a test or sample parcel (never a real Shopify order). */
+  deleteParcel: (id: string) => Promise<Result>;
   receiveReturn: (trk: string) => Result;
   startRide: (code: string, riderId: string, manual: boolean) => Result;
   logCall: (id: string) => void;
-  deliver: (id: string, input: { otp: string; distanceM: number; photo?: string }) => Result;
-  markReturn: (id: string, input: { reason: ReturnReason; distanceM: number; photo?: string }) => Result & { flags?: string[] };
-  deposit: (riderId: string, amount: number) => void;
+  deliver: (id: string, input: { otp: string; distanceM: number; photo?: string; where?: { lat: number; lng: number; acc: number } }) => Result;
+  markReturn: (id: string, input: { reason: ReturnReason; distanceM: number; photo?: string; where?: { lat: number; lng: number; acc: number } }) => Result & { flags?: string[] };
+  /** Warehouse records cash it counted. With a rider's QR request, a matching amount is confirmed
+   *  at once; otherwise it waits for the rider to accept or dispute it on their phone. */
+  deposit: (riderId: string, amount: number, request?: { requestId: string; declared: number }) => Result;
+  /** Rider accepts or disputes a deposit the warehouse recorded. */
+  answerDeposit: (d: Deposit, accept: boolean, note?: string) => Promise<Result>;
+  /** Admin closes a disputed or unanswered deposit. */
+  resolveDeposit: (d: Deposit, note?: string) => Promise<Result>;
   saveReview: (id: string, review: Omit<Review, "at">) => void;
   loadSample: () => Promise<Result>;
   clearSample: () => Promise<Result>;
@@ -67,6 +81,66 @@ async function chunked<T>(rows: T[], size: number, fn: (part: T[]) => PromiseLik
   }
 }
 
+/**
+ * Re-dispatch a returned parcel as a new linked parcel (#1047 → #1047-R1) waiting for a label.
+ * The original keeps its return, rider and evidence, so return rates stay correct.
+ * Returns the new parcel, or null when it was already re-sent.
+ */
+function resend(s: AppState, id: string, by: string): Parcel | null {
+  const p = s.parcels.find((x) => x.id === id);
+  if (!p) return null;
+  const base = p.id.replace(/-R\d+$/, "");
+  if (s.parcels.some((x) => x.events.some((e) => e.what === `Re-dispatch of ${p.id}`))) return null;
+  const n = s.parcels.filter((x) => x.id.startsWith(`${base}-R`)).length + 1;
+  const at = Date.now();
+  const copy: Parcel = {
+    ...p,
+    id: `${base}-R${n}`,
+    trk: `${p.trk.replace(/-\d+$/, "")}-${n}`, // RT1047-K7 → RT1047-K7-1 (originals never end in -digits)
+    status: "new",
+    riderId: undefined,
+    createdAt: at,
+    rideStartedAt: undefined,
+    manualScan: false,
+    calls: [],
+    attempt: undefined,
+    flags: [],
+    review: undefined,
+    shopifySync: undefined,
+    events: [{ at, what: `Re-dispatch of ${p.id}`, by }],
+  };
+  s.parcels.push(copy);
+  p.events.push({ at, what: `Sent out again as ${copy.id}`, by });
+  return copy;
+}
+
+type Op = { t: "ins"; rows: ParcelRow[] } | { t: "upd"; row: ParcelRow } | { t: "ev"; rows: EventRow[] } | { t: "dep"; rows: DepositRow[] };
+
+const isNetworkError = (msg: string) =>
+  (typeof navigator !== "undefined" && !navigator.onLine) || /failed to fetch|fetch failed|network|load failed|timed? ?out|aborted/i.test(msg);
+
+/** Runs one queued operation. Returns an error message, or null when it was saved. */
+async function runOp(op: Op): Promise<string | null> {
+  try {
+    const client = sb();
+    let res: { error: { message: string; code?: string } | null };
+    if (op.t === "ins") res = await client.from("parcels").upsert(op.rows, { onConflict: "id", ignoreDuplicates: true });
+    else if (op.t === "upd") {
+      const { id, ...rest } = op.row;
+      res = await client.from("parcels").update(rest).eq("id", id);
+    } else if (op.t === "ev") res = await client.from("parcel_events").insert(op.rows);
+    else {
+      res = await client.from("deposits").insert(op.rows);
+      // database without update 004: save the basic deposit rather than lose it
+      if (res.error && /request_id|declared|status|confirmed_at|column/i.test(res.error.message))
+        res = await client.from("deposits").insert(op.rows.map(({ rider_id, amount, at, by }) => ({ rider_id, amount, at, by })));
+    }
+    return res.error ? res.error.message : null;
+  } catch (err) {
+    return (err as Error).message || "network error";
+  }
+}
+
 export const homeFor = (role: Role) => (role === "rider" ? "/rider" : role === "warehouse" ? "/warehouse" : "/admin");
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
@@ -76,6 +150,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [authChecked, setAuthChecked] = useState(false);
   const [me, setMe] = useState<Me | null>(null);
   const meRef = useRef<Me | null>(null);
+  const flushRef = useRef<(() => Promise<void>) | null>(null);
+  const uidRef = useRef<string | undefined>(undefined);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -110,7 +186,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         client.from("riders").select("*").order("name"),
         fetchAll<ParcelRow>((f, t) => client.from("parcels").select("*").or(`created_at.gte."${since}",status.in.(${OPEN})`).order("created_at").range(f, t)),
         fetchAll<EventRow>((f, t) => client.from("parcel_events").select("parcel_id,at,what,by,kind").gte("at", since).order("at").range(f, t)),
-        client.from("deposits").select("rider_id,amount,at,by").gte("at", since).order("at"),
+        client.from("deposits").select("*").gte("at", since).order("at"),
       ]);
       if (riderRes.error) throw new Error(riderRes.error.message);
       if (depositRes.error) throw new Error(depositRes.error.message);
@@ -184,7 +260,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const client = sb();
     const reloadDeposits = async () => {
       const since = new Date(Date.now() - 10 * 864e5).toISOString();
-      const { data } = await client.from("deposits").select("rider_id,amount,at,by").gte("at", since).order("at");
+      const { data } = await client.from("deposits").select("*").gte("at", since).order("at");
       if (data) set({ ...ref.current, deposits: (data as DepositRow[]).map(toDeposit) });
     };
     const reloadRiders = async () => {
@@ -225,12 +301,78 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [userId, loaded, set]);
 
   // ── writes ──
+  // ── writes, with an offline queue ──
+  // Every change is turned into database operations and queued (in this browser, per login).
+  // The queue uploads at once; if the phone has no signal the operations wait and retry every
+  // 20 seconds and as soon as the phone is back online, so a delivery is never lost.
+  const queue = useRef<Op[]>([]);
+  const flushing = useRef(false);
+  const [pending, setPending] = useState(0);
+  const qkey = (uid: string | undefined) => `rider-trace.pending.${uid ?? "none"}`;
+
+  const saveQueue = useCallback(() => {
+    setPending(queue.current.length);
+    try {
+      const k = qkey(uidRef.current);
+      if (queue.current.length) localStorage.setItem(k, JSON.stringify(queue.current));
+      else localStorage.removeItem(k);
+    } catch {
+      /* storage full or blocked: the queue still lives in memory */
+    }
+  }, []);
+
+  const flush = useCallback(async () => {
+    if (flushing.current || !configured) return;
+    flushing.current = true;
+    let failed: string | null = null;
+    try {
+      while (queue.current.length) {
+        const msg = await runOp(queue.current[0]);
+        if (msg && isNetworkError(msg)) break; // still offline: try again later
+        queue.current.shift();
+        saveQueue();
+        if (msg) failed = msg;
+      }
+    } finally {
+      flushing.current = false;
+      setPending(queue.current.length);
+    }
+    if (failed) {
+      setError(`Not saved: ${failed}. Reloading the latest data.`);
+      await reload();
+    }
+  }, [reload, saveQueue]);
+  flushRef.current = flush;
+
+  // load this login's waiting operations, and retry them while any are left
+  useEffect(() => {
+    uidRef.current = userId;
+    if (!userId) {
+      queue.current = [];
+      setPending(0);
+      return;
+    }
+    try {
+      queue.current = JSON.parse(localStorage.getItem(qkey(userId)) ?? "[]") as Op[];
+    } catch {
+      queue.current = [];
+    }
+    setPending(queue.current.length);
+    const retry = () => void flushRef.current?.();
+    const t = setInterval(() => queue.current.length && retry(), 20000);
+    window.addEventListener("online", retry);
+    retry();
+    return () => {
+      clearInterval(t);
+      window.removeEventListener("online", retry);
+    };
+  }, [userId]);
+
   const persist = useCallback(
     async (before: AppState, after: AppState) => {
-      const client = sb();
       const prev = new Map(before.parcels.map((p) => [p.id, p] as const));
       const inserts: ParcelRow[] = [];
-      const updates: ParcelRow[] = [];
+      const ops: Op[] = [];
       const events: EventRow[] = [];
       for (const p of after.parcels) {
         const o = prev.get(p.id);
@@ -239,34 +381,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           events.push(...p.events.map((e) => fromEvent(p.id, e)));
           continue;
         }
-        if (JSON.stringify(fromParcel(p)) !== JSON.stringify(fromParcel(o))) updates.push(fromParcel(p));
+        if (JSON.stringify(fromParcel(p)) !== JSON.stringify(fromParcel(o))) ops.push({ t: "upd", row: fromParcel(p) });
         if (p.events.length > o.events.length) events.push(...p.events.slice(o.events.length).map((e) => fromEvent(p.id, e)));
       }
+      if (inserts.length) ops.unshift({ t: "ins", rows: inserts });
+      if (events.length) ops.push({ t: "ev", rows: events });
       const deposits = after.deposits.slice(before.deposits.length).map(fromDeposit);
-      try {
-        if (inserts.length) {
-          const { error: e } = await client.from("parcels").insert(inserts);
-          if (e) throw new Error(e.message);
-        }
-        for (const row of updates) {
-          const { id, ...rest } = row;
-          const { error: e } = await client.from("parcels").update(rest).eq("id", id);
-          if (e) throw new Error(e.message);
-        }
-        if (events.length) {
-          const { error: e } = await client.from("parcel_events").insert(events);
-          if (e) throw new Error(e.message);
-        }
-        if (deposits.length) {
-          const { error: e } = await client.from("deposits").insert(deposits);
-          if (e) throw new Error(e.message);
-        }
-      } catch (err) {
-        setError(`Not saved: ${(err as Error).message}. Reloading the latest data.`);
-        await reload();
-      }
+      if (deposits.length) ops.push({ t: "dep", rows: deposits });
+      if (!ops.length) return;
+      queue.current.push(...ops);
+      saveQueue();
+      await flush();
     },
-    [reload]
+    [flush, saveQueue]
   );
 
   /** Clone, change, show at once, then save in the background. */
@@ -292,6 +419,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       me,
       state,
       error,
+      pending,
       clearError: () => setError(null),
       reload,
 
@@ -301,6 +429,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: true, message: "Signed in" };
       },
       signOut: async () => {
+        await flushRef.current?.(); // anything still waiting stays queued for this login's next sign-in
         await sb().auth.signOut();
       },
 
@@ -349,6 +478,41 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           return ids;
         }),
 
+      sendAgain: (id) => {
+        const p0 = ref.current.parcels.find((x) => x.id === id);
+        if (!p0) return { ok: false, message: "Parcel not found." };
+        if (p0.status !== "received") return { ok: false, message: "Check the return in at the warehouse first." };
+        const copy = mutate((s) => resend(s, id, actor()));
+        return copy ? { ok: true, message: `${copy.id} created. Print its label from the warehouse desk.` } : { ok: false, message: "Already sent again." };
+      },
+
+      takeBack: (id) => {
+        const p0 = ref.current.parcels.find((x) => x.id === id);
+        if (!p0) return { ok: false, message: "Parcel not found." };
+        if (p0.status !== "handed") return { ok: false, message: "Only parcels the rider has not scanned yet can be taken back." };
+        mutate((s) => {
+          const p = s.parcels.find((x) => x.id === id)!;
+          const from = riderName(s, p.riderId);
+          p.status = "labeled";
+          p.riderId = undefined;
+          p.events.push({ at: Date.now(), what: `Taken back from ${from}`, by: actor() });
+        });
+        return { ok: true, message: `${p0.id} is back at the desk.` };
+      },
+
+      deleteParcel: async (id) => {
+        const p0 = ref.current.parcels.find((x) => x.id === id);
+        if (!p0) return { ok: false, message: "Parcel not found." };
+        if (p0.shopifyOrderId) return { ok: false, message: "Real Shopify orders can't be deleted. Cancel the order in Shopify instead." };
+        set({ ...ref.current, parcels: ref.current.parcels.filter((x) => x.id !== id) });
+        const { error: e } = await sb().from("parcels").delete().eq("id", id);
+        if (e) {
+          await reload();
+          return { ok: false, message: e.message };
+        }
+        return { ok: true, message: `${p0.id} deleted.` };
+      },
+
       adminSetOutcome: (id, outcome, reason, note) => {
         const p0 = ref.current.parcels.find((x) => x.id === id);
         if (!p0) return { ok: false, message: "Parcel not found." };
@@ -384,6 +548,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const p = s.parcels.find((x) => x.id === p0.id)!;
           p.status = "received";
           p.events.push({ at: Date.now(), what: "Return checked in at warehouse", by: actor() });
+          if (p.review?.resend) resend(s, p.id, actor());
         });
         return { ok: true, message: `Return ${p0.trk} checked in.` };
       },
@@ -424,7 +589,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const p = s.parcels.find((x) => x.id === id)!;
           const at = Date.now();
           p.status = "delivered";
-          p.attempt = { outcome: "delivered", at, calls: p.calls.length, distanceM: input.distanceM, photo: input.photo, otpOk: RULES.requireOtp, manualScan: !!p.manualScan };
+          p.attempt = { outcome: "delivered", at, calls: p.calls.length, distanceM: input.distanceM, photo: input.photo, otpOk: RULES.requireOtp, manualScan: !!p.manualScan, where: input.where };
           p.flags = flagsFor(p.attempt);
           p.events.push({ at, what: RULES.requireOtp ? "Delivered, customer code verified" : "Delivered, handover photo taken", by: riderName(s, p.riderId), kind: "good" });
         });
@@ -442,6 +607,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           distanceM: input.distanceM,
           photo: input.photo,
           manualScan: !!p0.manualScan,
+          where: input.where,
         };
         const flags = flagsFor(attempt);
         if (RULES.mode === "block" && flags.some((f) => !NON_BLOCKING.includes(f))) {
@@ -457,10 +623,53 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: true, message: flags.length ? "Return saved and flagged for review." : "Return saved. Bring the parcel back to the warehouse.", flags };
       },
 
-      deposit: (riderId, amount) =>
+      deposit: (riderId, amount, request) => {
+        if (request && ref.current.deposits.some((d) => d.requestId === request.requestId))
+          return { ok: false, message: "This cash QR was already used. Ask the rider to open a new one." };
+        const at = Date.now();
+        const matches = !!request && Math.round(request.declared) === Math.round(amount);
         mutate((s) => {
-          s.deposits.push({ riderId, amount, at: Date.now(), by: actor() });
-        }),
+          s.deposits.push({
+            riderId,
+            amount,
+            at,
+            by: actor(),
+            requestId: request?.requestId,
+            declared: request?.declared,
+            status: matches ? "confirmed" : "pending",
+            confirmedAt: matches ? at : undefined,
+          });
+        });
+        return {
+          ok: true,
+          message: matches ? "Recorded. The rider's phone shows it as received." : "Recorded. The rider must accept or dispute the amount on their phone.",
+        };
+      },
+
+      answerDeposit: async (d, accept, note) => {
+        const patch = { status: accept ? "confirmed" : "disputed", rider_note: note?.trim() || null, confirmed_at: new Date().toISOString() };
+        const same = (x: Deposit) => (d.id !== undefined ? x.id === d.id : x.requestId === d.requestId && x.at === d.at);
+        set({ ...ref.current, deposits: ref.current.deposits.map((x) => (same(x) ? { ...x, status: accept ? "confirmed" : "disputed", riderNote: note?.trim() || undefined, confirmedAt: Date.now() } : x)) });
+        const q = sb().from("deposits").update(patch);
+        const { error: e } = d.id !== undefined ? await q.eq("id", d.id) : await q.eq("request_id", d.requestId ?? "");
+        if (e) {
+          await reload();
+          return { ok: false, message: `Not saved: ${e.message}` };
+        }
+        return { ok: true, message: accept ? "Thanks, deposit confirmed." : "Dispute sent to the admin." };
+      },
+
+      resolveDeposit: async (d, note) => {
+        if (d.id === undefined) return { ok: false, message: "Reload the page and try again." };
+        const by = `${actor()}${note?.trim() ? ` · ${note.trim()}` : ""}`.slice(0, 200);
+        set({ ...ref.current, deposits: ref.current.deposits.map((x) => (x.id === d.id ? { ...x, status: "resolved", resolvedBy: by } : x)) });
+        const { error: e } = await sb().from("deposits").update({ status: "resolved", resolved_by: by }).eq("id", d.id);
+        if (e) {
+          await reload();
+          return { ok: false, message: `Not saved: ${e.message}` };
+        }
+        return { ok: true, message: "Marked resolved." };
+      },
 
       saveReview: (id, review) =>
         mutate((s) => {
@@ -468,6 +677,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           if (!p) return;
           const at = Date.now();
           p.review = { ...review, at };
+          if (review.resend && p.status === "received") resend(s, p.id, actor());
           const label = review.decision === "rider" ? "rider fault" : review.decision === "customer" ? "customer fault" : "needs more checking";
           p.events.push({ at, what: `Admin review: ${label}${review.note ? ` · "${review.note}"` : ""}`, by: actor() });
         }),
@@ -504,7 +714,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       },
     }),
-    [authChecked, session, loaded, me, state, error, reload, mutate]
+    [authChecked, session, loaded, me, state, error, pending, reload, mutate]
   );
 
   return <Ctx.Provider value={store}>{children}</Ctx.Provider>;
@@ -516,12 +726,17 @@ export function useStore() {
   return s;
 }
 
-/** Cash a rider is holding: COD delivered today minus today's deposits. */
+/**
+ * Cash a rider is holding: all COD they delivered minus all their deposits (within the loaded
+ * 10 days), so cash not handed in yesterday is still owed today. `collected` and `deposited`
+ * are today's figures, for display.
+ */
 export function cashInHand(s: AppState, riderId: string) {
   const today = new Date().toDateString();
-  const collected = s.parcels
-    .filter((p) => p.riderId === riderId && p.status === "delivered" && p.attempt && new Date(p.attempt.at).toDateString() === today)
-    .reduce((sum, p) => sum + p.cod, 0);
-  const deposited = s.deposits.filter((d) => d.riderId === riderId && new Date(d.at).toDateString() === today).reduce((sum, d) => sum + d.amount, 0);
-  return { collected, deposited, inHand: Math.max(0, collected - deposited) };
+  const delivered = s.parcels.filter((p) => p.riderId === riderId && p.status === "delivered" && p.attempt);
+  const deposits = s.deposits.filter((d) => d.riderId === riderId);
+  const owed = delivered.reduce((sum, p) => sum + p.cod, 0) - deposits.reduce((sum, d) => sum + d.amount, 0);
+  const collected = delivered.filter((p) => new Date(p.attempt!.at).toDateString() === today).reduce((sum, p) => sum + p.cod, 0);
+  const deposited = deposits.filter((d) => new Date(d.at).toDateString() === today).reduce((sum, d) => sum + d.amount, 0);
+  return { collected, deposited, inHand: Math.max(0, owed), carried: Math.max(0, owed - (collected - deposited)) };
 }

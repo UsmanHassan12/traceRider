@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Icon } from "@/components/Icon";
+import { Pager, usePaged } from "@/components/Pager";
 import { StatusPill } from "@/components/StatusPill";
 import { isToday, pkr, time } from "@/lib/format";
 import type { Parcel } from "@/lib/types";
@@ -14,7 +15,6 @@ export default function ParcelsPage() {
   const { state, rider } = useRider();
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState<Record<string, boolean>>({});
   if (!rider) return null;
 
   const today = state.parcels.filter(
@@ -76,39 +76,44 @@ export default function ParcelsPage() {
       <div className="phone-main">
         {groups.length === 0 && <div className="empty">No parcels match.</div>}
         {groups.map((g) => (
-          <section key={g.title} className="stack" style={{ gap: 8 }}>
-            <h2 className="xs" style={{ color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 600 }}>{g.title}</h2>
-            {g.items.slice(0, open[g.title] ? undefined : 10).map((p) => {
-              const body = (
-                <>
-                  <span className="row between">
-                    <span style={{ fontWeight: 600 }}>{p.customer}</span>
-                    <StatusPill status={p.status} label={p.status === "out" ? "Live" : p.status === "handed" ? "Not scanned" : undefined} />
-                  </span>
-                  <span className="small muted">{p.address}</span>
-                  <span className="row between">
-                    <span className="mono xs muted">{p.trk} · {p.attempt ? time(p.attempt.at) : time(p.rideStartedAt ?? p.createdAt)}</span>
-                    <span className="num" style={{ fontWeight: 600 }}>{pkr(p.cod)}</span>
-                  </span>
-                  {p.attempt?.reason && <span className="xs" style={{ color: "var(--red)" }}>{p.attempt.reason}</span>}
-                </>
-              );
-              const h = href(p);
-              const style = { display: "flex", flexDirection: "column" as const, gap: 6, textDecoration: "none", color: "var(--ink)", borderRadius: 12 };
-              return h ? (
-                <Link key={p.id} href={h} className="card" style={style}>{body}</Link>
-              ) : (
-                <div key={p.id} className="card" style={style}>{body}</div>
-              );
-            })}
-            {g.items.length > 10 && !open[g.title] && (
-              <button type="button" className="btn ghost" onClick={() => setOpen({ ...open, [g.title]: true })}>
-                Show {g.items.length - 10} more
-              </button>
-            )}
-          </section>
+          <Group key={g.title} title={g.title} items={g.items} href={href} resetKey={`${filter}|${q}`} />
         ))}
       </div>
     </>
+  );
+}
+
+function Group({ title, items, href, resetKey }: { title: string; items: Parcel[]; href: (p: Parcel) => string | undefined; resetKey: string }) {
+  const pg = usePaged(items, 8, resetKey);
+  return (
+    <section className="stack" style={{ gap: 8 }}>
+      <h2 className="xs" style={{ color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".06em", fontWeight: 600 }}>
+        {title} · {items.length}
+      </h2>
+      {pg.rows.map((p) => {
+        const body = (
+          <>
+            <span className="row between">
+              <span style={{ fontWeight: 600 }}>{p.customer}</span>
+              <StatusPill status={p.status} label={p.status === "out" ? "Live" : p.status === "handed" ? "Not scanned" : undefined} />
+            </span>
+            <span className="small muted">{p.address}</span>
+            <span className="row between">
+              <span className="mono xs muted">{p.trk} · {p.attempt ? time(p.attempt.at) : time(p.rideStartedAt ?? p.createdAt)}</span>
+              <span className="num" style={{ fontWeight: 600 }}>{pkr(p.cod)}</span>
+            </span>
+            {p.attempt?.reason && <span className="xs" style={{ color: "var(--red)" }}>{p.attempt.reason}</span>}
+          </>
+        );
+        const h = href(p);
+        const style = { display: "flex", flexDirection: "column" as const, gap: 6, textDecoration: "none", color: "var(--ink)", borderRadius: 12 };
+        return h ? (
+          <Link key={p.id} href={h} className="card" style={style}>{body}</Link>
+        ) : (
+          <div key={p.id} className="card" style={style}>{body}</div>
+        );
+      })}
+      <Pager {...pg} label={title} />
+    </section>
   );
 }

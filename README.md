@@ -89,6 +89,16 @@ when Shopify has one; without it the location check is skipped and noted on the 
 4. When the warehouse confirms a handover, each Shopify order is fulfilled with the parcel code as tracking number.
    Failures show on the warehouse desk and in Admin › Orders with a **Retry Shopify** button.
 
+### Database updates (run each once, in order, in Supabase › SQL Editor)
+
+| File | What it adds |
+| --- | --- |
+| `supabase/migrations/002_shopify_sync.sql` | Shopify fulfillment status on each parcel |
+| `supabase/migrations/003_proof_photos.sql` | Private `proof` storage bucket for doorstep photos |
+| `supabase/migrations/004_cash_handover.sql` | Two-sided cash handover: rider's declared amount, one-time QR, accept / dispute |
+
+Open the file, copy everything inside it, paste into a new query and Run (don't paste the file name).
+
 ## Daily flow
 
 1. **Warehouse**: Print label → paste on box → pick rider → scan boxes into the handover → Confirm handover.

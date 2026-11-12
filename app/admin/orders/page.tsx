@@ -14,7 +14,7 @@ const PAGE = 25;
 const REASONS: ReturnReason[] = ["Customer not available", "Phone switched off", "Customer refused parcel", "Wrong or incomplete address", "Customer asked to reschedule"];
 
 export default function OrdersPage() {
-  const { state, adminSetOutcome, receiveReturn } = useStore();
+  const { state, adminSetOutcome, receiveReturn, sendAgain, takeBack, deleteParcel } = useStore();
   const toast = useToast();
   const [filter, setFilter] = useState<Filter>("riders");
   const [q, setQ] = useState("");
@@ -24,6 +24,7 @@ export default function OrdersPage() {
   const [note, setNote] = useState("");
   const [logFor, setLogFor] = useState<Parcel | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<Parcel | null>(null);
 
   const riderName = (id?: string) => state.riders.find((r) => r.id === id)?.name ?? "";
   const lastAt = (p: Parcel) => p.events[p.events.length - 1]?.at ?? p.createdAt;
@@ -147,6 +148,17 @@ export default function OrdersPage() {
                           <button type="button" className="btn sm" onClick={() => openMark(p, "delivered")}>Change to delivered</button>
                         </>
                       )}
+                      {p.status === "handed" && (
+                        <button type="button" className="btn sm" onClick={() => { const r = takeBack(p.id); toast(r.message, r.ok ? "good" : "bad"); }}>Take back</button>
+                      )}
+                      {p.status === "received" && !p.events.some((e) => e.what.startsWith("Sent out again as")) && (
+                        <button type="button" className="btn sm navy" onClick={() => { const r = sendAgain(p.id); toast(r.message, r.ok ? "good" : "bad"); }}>Send again</button>
+                      )}
+                      {!p.shopifyOrderId && (
+                        <button type="button" className="btn sm ghost" onClick={() => setDeleting(p)} aria-label={`Delete test order ${p.id}`}>
+                          <Icon name="x" size={14} /> Delete
+                        </button>
+                      )}
                       {p.shopifySync?.startsWith("error") && (
                         <button type="button" className="btn sm" disabled={busy === p.id} onClick={() => retry(p)}>{busy === p.id ? "Retrying…" : "Retry Shopify"}</button>
                       )}
@@ -195,6 +207,19 @@ export default function OrdersPage() {
               <button type="button" className={`btn ${marking.outcome === "delivered" ? "green" : "red"}`} onClick={saveMark}>
                 Mark {marking.outcome}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleting && (
+        <div className="overlay" onClick={(e) => e.target === e.currentTarget && setDeleting(null)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="del-title">
+            <h2 id="del-title">Delete {deleting.id}?</h2>
+            <div className="small muted">This test or sample parcel and its log are removed for good. Real Shopify orders can&apos;t be deleted here.</div>
+            <div className="row" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="btn" onClick={() => setDeleting(null)}>Cancel</button>
+              <button type="button" className="btn red" onClick={async () => { const d = deleting; setDeleting(null); const r = await deleteParcel(d.id); toast(r.message, r.ok ? "good" : "bad"); }}>Delete</button>
             </div>
           </div>
         </div>

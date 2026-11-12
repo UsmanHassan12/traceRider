@@ -1,5 +1,6 @@
 "use client";
 
+import { LoadingScreen } from "@/components/LoadingScreen";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { SetupNeeded } from "@/components/RoleGate";
@@ -16,5 +17,5 @@ export default function Home() {
     else router.replace("/login");
   }, [configured, ready, session, me, router]);
   if (!configured) return <SetupNeeded />;
-  return <div aria-busy="true" style={{ minHeight: "100dvh" }} />;
+  return <LoadingScreen label="Opening Rider Trace…" />;
 }

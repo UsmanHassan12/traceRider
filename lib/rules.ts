@@ -21,9 +21,10 @@ export const DEMO = process.env.NEXT_PUBLIC_DEMO === "true";
 /** Flags that are recorded for review but never block the rider. */
 export const NON_BLOCKING = ["Code typed, not scanned", "Address has no map pin"];
 
-export function flagsFor(a: Pick<Attempt, "outcome" | "calls" | "distanceM" | "photo" | "manualScan" | "customerReply">): string[] {
+export function flagsFor(a: Pick<Attempt, "outcome" | "calls" | "distanceM" | "photo" | "manualScan" | "customerReply" | "where">): string[] {
   const f: string[] = [];
-  if (a.distanceM < 0) f.push("Address has no map pin");
+  if (a.distanceM < 0 && !a.where) f.push("No GPS location");
+  else if (a.distanceM < 0) f.push("Address has no map pin");
   else if (a.distanceM > RULES.maxDistanceM)
     f.push(`Marked ${a.distanceM >= 1000 ? (a.distanceM / 1000).toFixed(1) + " km" : a.distanceM + " m"} from address`);
   if (a.outcome === "returned") {

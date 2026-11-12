@@ -20,11 +20,13 @@ function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const toReview = state.parcels.filter((p) => p.attempt?.outcome === "returned" && p.flags.length && !p.review && isToday(p.attempt.at)).length;
   const withRiders = state.parcels.filter((p) => p.status === "handed" || p.status === "out").length;
+  const cashIssues = state.deposits.filter((d) => d.status === "disputed").length;
 
   const nav: { href: string; label: string; icon: IconName; badge?: number; tone?: "red" | "navy" }[] = [
     { href: "/admin", label: "Overview", icon: "grid" },
     { href: "/admin/orders", label: "Orders", icon: "box", badge: withRiders, tone: "navy" },
     { href: "/admin/review", label: "Returns review", icon: "flag", badge: toReview, tone: "red" },
+    { href: "/admin/cash", label: "Cash", icon: "cash", badge: cashIssues, tone: "red" },
     { href: "/admin/staff", label: "Staff & riders", icon: "users" },
     { href: "/warehouse", label: "Warehouse desk", icon: "printer" },
   ];

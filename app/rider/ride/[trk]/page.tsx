@@ -9,6 +9,7 @@ import { PhotoCapture } from "@/components/PhotoCapture";
 import { useToast } from "@/components/Toast";
 import { ago, fmtDistance, pkr } from "@/lib/format";
 import { DEMO, RULES } from "@/lib/rules";
+import { storeProof } from "@/lib/photos";
 import { useDistance } from "@/lib/useDistance";
 import { useRider } from "@/lib/useRider";
 
@@ -19,10 +20,11 @@ export default function RidePage() {
   const router = useRouter();
   const toast = useToast();
   const p = state.parcels.find((x) => x.trk === code);
-  const { distance, gps, gpsError, demo, setDemo, isDemo, noPin } = useDistance(p?.lat ?? null, p?.lng ?? null);
+  const { distance, gps, here, gpsError, demo, setDemo, isDemo, noPin } = useDistance(p?.lat ?? null, p?.lng ?? null);
   const [delivering, setDelivering] = useState(false);
   const [otp, setOtp] = useState("");
   const [photo, setPhoto] = useState<string | undefined>();
+  const [saving, setSaving] = useState(false);
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 30000);
@@ -51,9 +53,12 @@ export default function RidePage() {
   const mapsDir = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
   const embed = `https://maps.google.com/maps?q=${dest}&z=15&output=embed`;
 
-  function confirmDelivery() {
-    if (!noPin && distance === null) return toast("Turn on location so the delivery can be checked against the address.", "bad");
-    const r = deliver(p!.id, { otp, distanceM: noPin ? -1 : distance ?? -1, photo });
+  async function confirmDelivery() {
+    if (!here && !isDemo) return toast("Turn on location. Every delivery records where the rider was.", "bad");
+    setSaving(true);
+    const stored = await storeProof(p!.id, photo);
+    setSaving(false);
+    const r = deliver(p!.id, { otp, distanceM: noPin ? -1 : distance ?? -1, photo: stored, where: here ?? undefined });
     if (!r.ok) return toast(r.message, "bad");
     toast(r.message, "good");
     router.replace("/rider");
@@ -156,7 +161,7 @@ export default function RidePage() {
             </div>
             <div className="row" style={{ justifyContent: "flex-end" }}>
               <button type="button" className="btn" onClick={() => setDelivering(false)}>Cancel</button>
-              <button type="button" className="btn green" disabled={RULES.requireOtp ? otp.length !== 4 : !photo} onClick={confirmDelivery}>Confirm delivery</button>
+              <button type="button" className="btn green" disabled={saving || (RULES.requireOtp ? otp.length !== 4 : !photo)} onClick={confirmDelivery}>{saving ? "Saving…" : "Confirm delivery"}</button>
             </div>
           </div>
         </div>

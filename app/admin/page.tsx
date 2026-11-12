@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { initials, isToday, pkr, time } from "@/lib/format";
+import { dayKey, initials, pkr, time } from "@/lib/format";
+import { useState } from "react";
 import { cashInHand, useStore } from "@/lib/store";
 import type { ReturnReason } from "@/lib/types";
 
@@ -19,8 +20,13 @@ function downloadCsv(rows: (string | number)[][], name: string) {
 
 export default function AdminOverview() {
   const { state } = useStore();
-  const today = state.parcels.filter((p) => isToday(p.createdAt) || (p.attempt && isToday(p.attempt.at)) || p.status === "out" || p.status === "handed");
-  const closed = state.parcels.filter((p) => p.attempt && isToday(p.attempt.at));
+  const todayKey = dayKey(Date.now());
+  const [day, setDay] = useState(todayKey);
+  const isToday = day === todayKey;
+  const onDay = (t?: number) => t !== undefined && dayKey(t) === day;
+  const minDay = dayKey(Date.now() - 9 * 864e5); // the app keeps the last 10 days loaded
+  const today = state.parcels.filter((p) => onDay(p.createdAt) || (p.attempt && onDay(p.attempt.at)) || (isToday && (p.status === "out" || p.status === "handed")));
+  const closed = state.parcels.filter((p) => p.attempt && onDay(p.attempt.at));
   const delivered = closed.filter((p) => p.attempt!.outcome === "delivered");
   const returned = closed.filter((p) => p.attempt!.outcome === "returned");
   const flagged = returned.filter((p) => p.flags.length);
@@ -67,7 +73,7 @@ export default function AdminOverview() {
         ["Order", "Tracking", "Customer", "Area", "Rider", "Outcome", "Reason", "Time", "COD", "Calls", "Distance m", "Flags"],
         ...closed.map((p) => [p.id, p.trk, p.customer, p.area, state.riders.find((r) => r.id === p.riderId)?.name ?? "", p.attempt!.outcome, p.attempt!.reason ?? "", time(p.attempt!.at), p.cod, p.attempt!.calls, p.attempt!.distanceM, p.flags.join("; ")]),
       ],
-      `rider-trace-${new Date().toISOString().slice(0, 10)}.csv`
+      `rider-trace-${day}.csv`
     );
   }
 
@@ -78,14 +84,19 @@ export default function AdminOverview() {
     <main className="adm-main">
       <div className="row between wrap" style={{ alignItems: "flex-end", gap: 14 }}>
         <div>
-          <div className="small muted">{new Date().toLocaleDateString("en-PK", { weekday: "long", day: "numeric", month: "long" })}</div>
-          <h1 style={{ fontSize: 26 }}>Today&apos;s deliveries</h1>
+          <div className="small muted">{new Date(`${day}T12:00:00`).toLocaleDateString("en-PK", { weekday: "long", day: "numeric", month: "long" })}</div>
+          <h1 style={{ fontSize: 26 }}>{isToday ? "Today's deliveries" : "Deliveries that day"}</h1>
         </div>
-        <button type="button" className="btn navy" onClick={exportDay}>Export daily report (CSV)</button>
+        <div className="row wrap" style={{ gap: 8 }}>
+          <label htmlFor="ov-day" className="sr-only">Day</label>
+          <input id="ov-day" type="date" className="input" value={day} min={minDay} max={todayKey} onChange={(e) => setDay(e.target.value || todayKey)} style={{ width: "auto", minHeight: 44 }} />
+          {!isToday && <button type="button" className="btn" onClick={() => setDay(todayKey)}>Today</button>}
+          <button type="button" className="btn navy" onClick={exportDay}>Export day (CSV)</button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }} className="num">
-        <div style={tile}><span className="xs muted">Orders today</span><span style={big}>{today.length}</span><span className="xs muted">{onRoad} still on the road</span></div>
+        <div style={tile}><span className="xs muted">{isToday ? "Orders today" : "Orders"}</span><span style={big}>{today.length}</span><span className="xs muted">{onRoad} still on the road</span></div>
         <div style={tile}><span className="xs muted">Delivered</span><span style={{ ...big, color: "var(--green)" }}>{delivered.length}</span><span className="xs muted">{closed.length ? Math.round((delivered.length / closed.length) * 100) : 0}% of closed parcels</span></div>
         <div style={tile}><span className="xs muted">Returned</span><span style={{ ...big, color: "var(--amber)" }}>{returned.length}</span><span className="xs muted">Return rate {rate.toFixed(1)}%</span></div>
         <div style={{ ...tile, background: "var(--red)", border: 0, color: "#fff" }}>
@@ -142,7 +153,7 @@ export default function AdminOverview() {
 
       <section className="card pad-lg stack">
         <div className="row between wrap">
-          <h2>Riders today</h2>
+          <h2>{isToday ? "Riders today" : "Riders that day"}</h2>
           <span className="row xs muted" style={{ gap: 6 }}><span style={{ width: 2, height: 14, background: "var(--ink)" }} />Team return rate {rate.toFixed(1)}%</span>
         </div>
         <div className="table-wrap">

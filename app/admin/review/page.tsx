@@ -1,5 +1,7 @@
 "use client";
 
+import { Pager, usePaged } from "@/components/Pager";
+import { LoadingScreen } from "@/components/LoadingScreen";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
@@ -12,7 +14,7 @@ import type { Parcel, ReviewDecision } from "@/lib/types";
 
 export default function ReviewPage() {
   return (
-    <Suspense fallback={<div aria-busy="true" />}>
+    <Suspense fallback={<LoadingScreen />}>
       <Review />
     </Suspense>
   );
@@ -31,6 +33,7 @@ function Review() {
   const open = flagged.filter((p) => !p.review);
   const done = flagged.filter((p) => p.review);
   const list = tab === "open" ? open : done;
+  const pgQ = usePaged(list, 10, tab);
   const selId = params.get("id") ?? list[0]?.id;
   const p = flagged.find((x) => x.id === selId) ?? list[0];
 
@@ -51,7 +54,7 @@ function Review() {
             <button type="button" className="chip" aria-pressed={tab === "done"} onClick={() => setTab("done")}>Done {done.length}</button>
           </div>
           {list.length === 0 && <div className="small muted" style={{ padding: 12 }}>{tab === "open" ? "All flagged returns are reviewed." : "Nothing reviewed yet."}</div>}
-          {list.map((x) => {
+          {pgQ.rows.map((x) => {
             const active = x.id === p?.id;
             return (
               <Link
@@ -65,6 +68,7 @@ function Review() {
               </Link>
             );
           })}
+          <div style={{ padding: "6px 8px 2px" }}><Pager {...pgQ} compact label="flagged returns" /></div>
         </section>
 
         {p ? (
@@ -88,7 +92,7 @@ function Detail({ p, onSave }: { p: Parcel; onSave: (d: ReviewDecision, note: st
   const rider = state.riders.find((r) => r.id === p.riderId);
   const [decision, setDecision] = useState<ReviewDecision>(p.review?.decision ?? "rider");
   const [note, setNote] = useState(p.review?.note ?? "");
-  const [resend, setResend] = useState(p.review?.resend ?? true);
+  const [resend, setResend] = useState(p.review?.resend ?? false);
   useEffect(() => {
     setDecision(p.review?.decision ?? "rider");
   }, [p.review?.decision]);
@@ -141,6 +145,20 @@ function Detail({ p, onSave }: { p: Parcel; onSave: (d: ReviewDecision, note: st
             {ev(noPhoto, "Photo", noPhoto ? "No photo" : "Doorstep photo taken", noPhoto ? "Required for every return" : time(a.at), !noPhoto ? <PhotoThumb src={a.photo} size={64} /> : undefined)}
             {ev(disputed, "Customer SMS reply", a.customerReply ? `"${a.customerReply}"` : "No reply yet", a.customerReply ? "Customer disputes the visit" : "SMS sent after the return")}
           </div>
+          <div className="row wrap small" style={{ gap: 10 }}>
+            {a.where ? (
+              <>
+                <span>
+                  Rider&apos;s phone was at <span className="mono">{a.where.lat.toFixed(5)}, {a.where.lng.toFixed(5)}</span> (±{a.where.acc} m) when this was marked.
+                </span>
+                <a className="btn sm" href={`https://www.google.com/maps/dir/?api=1&origin=${a.where.lat},${a.where.lng}&destination=${p.lat !== null && p.lng !== null ? `${p.lat},${p.lng}` : encodeURIComponent(p.address)}`} target="_blank" rel="noreferrer">
+                  Rider position vs address
+                </a>
+              </>
+            ) : (
+              <span className="muted">No rider location was recorded for this return.</span>
+            )}
+          </div>
           {a.manualScan && <div className="xs" style={{ color: "var(--amber-ink)" }}>The rider typed the tracking code instead of scanning the QR.</div>}
         </section>
 
@@ -177,7 +195,7 @@ function Detail({ p, onSave }: { p: Parcel; onSave: (d: ReviewDecision, note: st
           </fieldset>
           <label className="row small" style={{ gap: 10 }}>
             <input type="checkbox" checked={resend} onChange={(e) => setResend(e.target.checked)} style={{ width: 18, height: 18, accentColor: "var(--navy)" }} />
-            Send again tomorrow with a different rider
+            Send it out again (creates a new parcel for the warehouse to label)
           </label>
           <div className="field">
             <label htmlFor="rv-note">Note for the record</label>
