@@ -38,7 +38,7 @@ create table if not exists public.parcels (
   lat               double precision,
   lng               double precision,
   status            text not null default 'new'
-                    check (status in ('new', 'labeled', 'handed', 'out', 'delivered', 'returned', 'received')),
+                    check (status in ('new', 'labeled', 'handed', 'out', 'delivered', 'returned', 'received', 'archived')),
   rider_id          text references public.riders(id) on delete set null,
   created_at        timestamptz not null default now(),
   ride_started_at   timestamptz,
@@ -49,7 +49,10 @@ create table if not exists public.parcels (
   review            jsonb,                                 -- admin decision on a flagged return
   is_sample         boolean not null default false,
   shopify_sync      text,                                  -- null, 'fulfilled', or 'error: …'
-  shopify_synced_at timestamptz
+  shopify_synced_at timestamptz,
+  archived_from     text,                                  -- status before auto-archive (see migration 005)
+  archived_at       timestamptz,
+  restored_at       timestamptz
 );
 
 -- Append-only custody log. Every handover, scan, call and outcome is a row here.

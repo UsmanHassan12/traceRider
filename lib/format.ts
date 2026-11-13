@@ -37,6 +37,7 @@ export const STATUS: Record<ParcelStatus, { label: string; tone: "info" | "warn"
   delivered: { label: "Delivered", tone: "good" },
   returned: { label: "Returned, coming back", tone: "bad" },
   received: { label: "Return checked in", tone: "bad" },
+  archived: { label: "Archived", tone: "warn" },
 };
 
 /** Distance in metres between two lat/lng points. */

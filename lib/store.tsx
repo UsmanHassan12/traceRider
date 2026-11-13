@@ -63,6 +63,17 @@ const Ctx = createContext<Store | null>(null);
 const EMPTY: AppState = { version: 1, parcels: [], riders: [], deposits: [], currentRiderId: null, nextOrder: 1 };
 const OPEN = "new,labeled,handed,out,returned";
 
+/** Runs the database's archive job; never throws and gives up after 5 seconds. */
+async function archiveStale(): Promise<number> {
+  try {
+    const call = sb().rpc("archive_stale_parcels").then((r) => (r.error ? 0 : Number(r.data) || 0));
+    return await Promise.race([call, new Promise<number>((res) => setTimeout(() => res(0), 5000))]);
+  } catch {
+    return 0;
+  }
+}
+export { archiveStale };
+
 type Page<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
 async function fetchAll<T>(query: (from: number, to: number) => Page<T>): Promise<T[]> {
   const out: T[] = [];
@@ -184,7 +195,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const since = new Date(Date.now() - 10 * 864e5).toISOString();
       const [riderRes, parcelRows, eventRows, depositRes] = await Promise.all([
         client.from("riders").select("*").order("name"),
-        fetchAll<ParcelRow>((f, t) => client.from("parcels").select("*").or(`created_at.gte."${since}",status.in.(${OPEN})`).order("created_at").range(f, t)),
+        fetchAll<ParcelRow>((f, t) => client.from("parcels").select("*").or(`created_at.gte."${since}",status.in.(${OPEN})`).neq("status", "archived").order("created_at").range(f, t)),
         fetchAll<EventRow>((f, t) => client.from("parcel_events").select("parcel_id,at,what,by,kind").gte("at", since).order("at").range(f, t)),
         client.from("deposits").select("*").gte("at", since).order("at"),
       ]);
@@ -234,6 +245,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const m: Me = { userId, email, role: data.role as Role, riderId: data.rider_id, name: data.name };
         meRef.current = m;
         setMe(m);
+        // Move orders not delivered within 7 days to the archive before loading (also runs nightly
+        // in the database). Ignored on databases without migration 005.
+        if (m.role !== "rider") await archiveStale();
         await loadAll(m.riderId);
       } catch (err) {
         if (!cancelled) setError(`Could not load data: ${(err as Error).message}`);
@@ -277,6 +291,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           return;
         }
         const row = payload.new as ParcelRow;
+        if (row.status === "archived") {
+          set({ ...cur, parcels: cur.parcels.filter((p) => p.id !== row.id) });
+          return;
+        }
         const existing = cur.parcels.find((p) => p.id === row.id);
         const p = toParcel(row, existing?.events ?? []);
         set({ ...cur, parcels: existing ? cur.parcels.map((x) => (x.id === row.id ? p : x)) : [...cur.parcels, p] });

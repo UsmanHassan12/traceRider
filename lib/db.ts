@@ -26,6 +26,8 @@ export interface ParcelRow {
   review: Review | null;
   is_sample: boolean;
   shopify_sync?: string | null;
+  archived_from?: ParcelStatus | null;
+  archived_at?: string | null;
 }
 
 export interface EventRow {
@@ -88,6 +90,8 @@ export function toParcel(r: ParcelRow, events: CustodyEvent[]): Parcel {
     isSample: r.is_sample,
     shopifyOrderId: r.shopify_order_id ?? undefined,
     shopifySync: r.shopify_sync ?? undefined,
+    archivedFrom: r.archived_from ?? undefined,
+    archivedAt: ms(r.archived_at),
     events,
   };
 }

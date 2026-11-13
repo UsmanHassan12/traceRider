@@ -5,7 +5,8 @@ export type ParcelStatus =
   | "out" // rider scanned it, ride is live
   | "delivered"
   | "returned" // rider marked it returned, parcel on its way back
-  | "received"; // return checked back in at the warehouse
+  | "received" // return checked back in at the warehouse
+  | "archived"; // not delivered within 7 days, moved to Admin › Archive
 
 export type ReturnReason =
   | "Customer not available"
@@ -60,6 +61,8 @@ export interface Parcel {
   isSample?: boolean;
   shopifyOrderId?: string; // set for real Shopify orders (read-only in the app)
   shopifySync?: string; // "fulfilled" or "error: …" (written by the server)
+  archivedFrom?: ParcelStatus; // status before it was archived (written by the server)
+  archivedAt?: number;
   status: ParcelStatus;
   riderId?: string;
   createdAt: number;

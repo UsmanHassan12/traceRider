@@ -96,6 +96,7 @@ when Shopify has one; without it the location check is skipped and noted on the 
 | `supabase/migrations/002_shopify_sync.sql` | Shopify fulfillment status on each parcel |
 | `supabase/migrations/003_proof_photos.sql` | Private `proof` storage bucket for doorstep photos |
 | `supabase/migrations/004_cash_handover.sql` | Two-sided cash handover: rider's declared amount, one-time QR, accept / dispute |
+| `supabase/migrations/005_archive.sql` | **Archived** status: orders not delivered within 7 days move to Admin › Archive every night |
 
 Open the file, copy everything inside it, paste into a new query and Run (don't paste the file name).
 
@@ -106,6 +107,13 @@ Open the file, copy everything inside it, paste into a new query and Run (don't 
    (reason + 2 calls from the app + doorstep photo + within 300 m of the address).
 3. **Warehouse**: scan returned boxes to check them in; scan the rider's cash code to record the deposit.
 4. **Admin**: daily numbers, return rate per rider vs team, flagged returns with evidence and a decision.
+
+## Archive
+
+An order that is still not delivered 7 days after it arrived (needs label, ready, with a rider, or out for delivery)
+moves to **Admin › Archive**. The database does this every night at 2:00 am, and the app also does it whenever an admin
+or the warehouse desk opens it. Archived orders leave the warehouse desk, the rider's phone and Orders, but nothing is
+deleted: **Restore** puts an order back where it was, with another 7 days. Returned orders are never archived.
 
 ## Settings
 
