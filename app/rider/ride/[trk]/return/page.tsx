@@ -54,8 +54,11 @@ export default function ReturnPage() {
   const photoOk = !RULES.photoRequired || !!photo;
   const near = noPin ? !!here || isDemo : distance !== null && distance <= RULES.maxDistanceM;
   const dest = p.lat !== null && p.lng !== null ? `${p.lat},${p.lng}` : encodeURIComponent(p.address);
-  const passed = [!!reason, callsOk, photoOk, near].filter(Boolean).length;
-  const canSave = RULES.mode === "flag" ? !!reason : passed === 4;
+  const checks = RULES.distanceRequired ? [!!reason, callsOk, photoOk, near] : [!!reason, callsOk, photoOk];
+  const passed = checks.filter(Boolean).length;
+  const canSave = RULES.mode === "flag" ? !!reason : passed === checks.length;
+  // location is advisory when not required: amber instead of red, and it never blocks saving
+  const locTone = near ? "ok" : RULES.distanceRequired ? "fail" : "warn";
 
   async function save() {
     if (!reason) return;
@@ -109,11 +112,11 @@ export default function ReturnPage() {
           <PhotoCapture id="ret-photo" value={photo} onChange={setPhoto} />
         </Check>
 
-        <section className={near ? "card" : "card fail"} style={{ borderRadius: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-          <div className={`check ${near ? "ok" : "fail"}`}>
-            <span className="dot">{near ? <Icon name="check" size={14} stroke={3} /> : <Icon name="alert" size={14} stroke={3} />}</span>
+        <section className={locTone === "fail" ? "card fail" : "card"} style={{ borderRadius: 14, display: "flex", flexDirection: "column", gap: 10, ...(locTone === "warn" ? { border: "2px solid var(--amber)", background: "var(--amber-soft)" } : {}) }}>
+          <div className={`check ${locTone === "warn" ? "" : locTone}`}>
+            <span className="dot" style={locTone === "warn" ? { background: "var(--amber)" } : undefined}>{near ? <Icon name="check" size={14} stroke={3} /> : <Icon name="alert" size={14} stroke={3} />}</span>
             <div className="grow">
-              <div style={{ fontWeight: 600, color: near ? undefined : "var(--red)" }}>
+              <div style={{ fontWeight: 600, color: near ? undefined : locTone === "warn" ? "var(--amber-ink)" : "var(--red)" }}>
                 {noPin
                   ? here
                     ? "Location recorded (this address has no map pin to compare)"
@@ -124,11 +127,19 @@ export default function ReturnPage() {
                       ? `You're at the address (${fmtDistance(distance)})`
                       : `You are ${fmtDistance(distance)} from the address`}
               </div>
-              {!near && <div className="small muted">{gpsError && !isDemo ? gpsError : "Go to the customer's door to mark this return."}</div>}
+              {!near && (
+                <div className="small muted">
+                  {gpsError && !isDemo
+                    ? gpsError
+                    : RULES.distanceRequired
+                      ? "Go to the customer's door to mark this return."
+                      : "You can still save. The return will be flagged for the admin to review your location."}
+                </div>
+              )}
             </div>
           </div>
           {!near && (
-            <a href={`https://www.google.com/maps/dir/?api=1&destination=${dest}`} target="_blank" rel="noreferrer" className="btn sm" style={{ color: "var(--red)" }}>
+            <a href={`https://www.google.com/maps/dir/?api=1&destination=${dest}`} target="_blank" rel="noreferrer" className="btn sm" style={{ color: locTone === "warn" ? "var(--amber-ink)" : "var(--red)" }}>
               Navigate to address
             </a>
           )}
@@ -136,7 +147,7 @@ export default function ReturnPage() {
         </section>
 
         <button type="button" className="btn red xl" disabled={!canSave || saving} onClick={save} style={{ marginTop: 6 }}>
-          {canSave ? "Confirm return" : `Confirm return · ${passed} of 4 checks`}
+          {canSave ? "Confirm return" : `Confirm return · ${passed} of ${checks.length} checks`}
         </button>
       </div>
     </>

@@ -8,6 +8,8 @@ import { StatusPill } from "@/components/StatusPill";
 import { isToday, pkr, time } from "@/lib/format";
 import type { Parcel } from "@/lib/types";
 import { useRider } from "@/lib/useRider";
+import { useRoute } from "@/lib/useRoute";
+import { StopBadge } from "@/components/StopBadge";
 
 type Filter = "all" | "out" | "handed" | "delivered" | "returned";
 
@@ -15,7 +17,11 @@ export default function ParcelsPage() {
   const { state, rider } = useRider();
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
+  const open = rider ? state.parcels.filter((p) => p.riderId === rider.id && (p.status === "out" || p.status === "handed")) : [];
+  const route = useRoute(open);
   if (!rider) return null;
+  const stopOf = (p: Parcel) => route.stopOf.get(p.id)?.stop ?? null;
+  const byStop = (a: Parcel, b: Parcel) => (stopOf(a) ?? 999) - (stopOf(b) ?? 999);
 
   const today = state.parcels.filter(
     (p) => p.riderId === rider.id && (p.status === "out" || p.status === "handed" || (p.attempt && isToday(p.attempt.at)))
@@ -36,8 +42,8 @@ export default function ParcelsPage() {
   };
   const list = today.filter(match);
   const groups: { title: string; items: Parcel[] }[] = [
-    { title: "On the road", items: list.filter((p) => p.status === "out") },
-    { title: "Handed to you, scan to start", items: list.filter((p) => p.status === "handed") },
+    { title: "On the road · nearest first", items: list.filter((p) => p.status === "out").sort(byStop) },
+    { title: "Handed to you, scan to start", items: list.filter((p) => p.status === "handed").sort(byStop) },
     { title: "Closed today", items: list.filter((p) => p.attempt).sort((a, b) => b.attempt!.at - a.attempt!.at) },
   ].filter((g) => g.items.length);
 
@@ -76,14 +82,14 @@ export default function ParcelsPage() {
       <div className="phone-main">
         {groups.length === 0 && <div className="empty">No parcels match.</div>}
         {groups.map((g) => (
-          <Group key={g.title} title={g.title} items={g.items} href={href} resetKey={`${filter}|${q}`} />
+          <Group key={g.title} title={g.title} items={g.items} href={href} resetKey={`${filter}|${q}`} stopOf={stopOf} />
         ))}
       </div>
     </>
   );
 }
 
-function Group({ title, items, href, resetKey }: { title: string; items: Parcel[]; href: (p: Parcel) => string | undefined; resetKey: string }) {
+function Group({ title, items, href, resetKey, stopOf }: { title: string; items: Parcel[]; href: (p: Parcel) => string | undefined; resetKey: string; stopOf: (p: Parcel) => number | null }) {
   const pg = usePaged(items, 8, resetKey);
   return (
     <section className="stack" style={{ gap: 8 }}>
@@ -94,7 +100,10 @@ function Group({ title, items, href, resetKey }: { title: string; items: Parcel[
         const body = (
           <>
             <span className="row between">
-              <span style={{ fontWeight: 600 }}>{p.customer}</span>
+              <span className="row" style={{ minWidth: 0 }}>
+                {!p.attempt && <StopBadge n={stopOf(p)} />}
+                <span style={{ fontWeight: 600 }}>{p.customer}</span>
+              </span>
               <StatusPill status={p.status} label={p.status === "out" ? "Live" : p.status === "handed" ? "Not scanned" : undefined} />
             </span>
             <span className="small muted">{p.address}</span>

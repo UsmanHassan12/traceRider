@@ -5,7 +5,10 @@ import { useEffect, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { ago, initials, isToday, pkr } from "@/lib/format";
 import { RULES } from "@/lib/rules";
+import { routeLink } from "@/lib/route";
 import { cashInHand } from "@/lib/store";
+import { useRoute } from "@/lib/useRoute";
+import { StopBadge } from "@/components/StopBadge";
 import { useRider } from "@/lib/useRider";
 
 export default function RiderHome() {
@@ -16,11 +19,14 @@ export default function RiderHome() {
     const t = setInterval(() => tick((n) => n + 1), 30000);
     return () => clearInterval(t);
   }, []);
+  const mine = rider ? state.parcels.filter((p) => p.riderId === rider.id) : [];
+  const route = useRoute(mine.filter((p) => p.status === "out" || p.status === "handed"));
   if (!rider) return null;
 
-  const mine = state.parcels.filter((p) => p.riderId === rider.id);
-  const live = mine.filter((p) => p.status === "out").sort((a, b) => (a.rideStartedAt ?? 0) - (b.rideStartedAt ?? 0));
+  const order = (id: string) => route.stopOf.get(id)?.stop ?? 999;
+  const live = mine.filter((p) => p.status === "out").sort((a, b) => order(a.id) - order(b.id));
   const waiting = mine.filter((p) => p.status === "handed");
+  const mapLink = routeLink(route.stops.filter((s) => s.parcel.status === "out"));
   const closedToday = mine.filter((p) => p.attempt && isToday(p.attempt.at));
   const delivered = closedToday.filter((p) => p.attempt!.outcome === "delivered").length;
   const returned = closedToday.length - delivered;
@@ -83,12 +89,18 @@ export default function RiderHome() {
         <section className="stack" style={{ gap: 10 }}>
           <div className="row between" style={{ alignItems: "baseline" }}>
             <h2 style={{ fontSize: 15 }}>Live rides</h2>
-            <span className="xs muted">Oldest first</span>
+            <span className="xs muted">{route.hasBase ? "Nearest first, farthest last" : "In the order received"}</span>
           </div>
+          {mapLink && live.length > 1 && (
+            <a href={mapLink} target="_blank" rel="noreferrer" className="btn" style={{ minHeight: 48 }}>
+              <Icon name="map" size={18} /> Open full route in Google Maps
+            </a>
+          )}
           {live.length === 0 && <div className="empty">No live rides. Scan a parcel to start one.</div>}
           {live.map((p) => (
             <Link key={p.id} href={`/rider/ride/${encodeURIComponent(p.trk)}`} className="card" style={{ textDecoration: "none", color: "var(--ink)", display: "flex", flexDirection: "column", gap: 8, borderRadius: 14 }}>
               <div className="row between" style={{ alignItems: "flex-start" }}>
+                <StopBadge n={route.stopOf.get(p.id)?.stop ?? null} />
                 <div className="grow">
                   <div style={{ fontWeight: 600 }}>{p.customer}</div>
                   <div className="small muted">{p.address}</div>
@@ -114,3 +126,4 @@ export default function RiderHome() {
     </>
   );
 }
+

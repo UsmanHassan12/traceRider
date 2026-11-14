@@ -122,6 +122,7 @@ deleted: **Restore** puts an order back where it was, with another 7 days. Retur
 | Return rules (calls, distance, photo, block or flag) and cash limit | `lib/rules.ts` |
 | Require the customer's SMS code on delivery (needs an SMS provider) | `NEXT_PUBLIC_REQUIRE_OTP=true` |
 | Warehouse phone on the rider profile | `NEXT_PUBLIC_DESK_PHONE` |
+| Warehouse location for the rider's delivery order (nearest first, farthest last) | `NEXT_PUBLIC_WAREHOUSE_LAT`, `NEXT_PUBLIC_WAREHOUSE_LNG` |
 | Colours | `app/globals.css` |
 
 Phones need location and camera permission. Both only work over HTTPS, which Vercel provides.

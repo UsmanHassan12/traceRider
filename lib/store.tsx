@@ -3,7 +3,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fromDeposit, fromEvent, fromParcel, sameEvent, toDeposit, toEvent, toParcel, toRider, type DepositRow, type EventRow, type ParcelRow, type RiderRow } from "./db";
-import { flagsFor, NON_BLOCKING, RULES } from "./rules";
+import { blocks, flagsFor, RULES } from "./rules";
 import { makeParcel, seedState } from "./seed";
 import { configured, sb } from "./supabase";
 import type { AppState, Deposit, Me, Parcel, ReturnReason, Review, Role } from "./types";
@@ -628,7 +628,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           where: input.where,
         };
         const flags = flagsFor(attempt);
-        if (RULES.mode === "block" && flags.some((f) => !NON_BLOCKING.includes(f))) {
+        if (RULES.mode === "block" && flags.some(blocks)) {
           return { ok: false, message: "Some checks are not met yet.", flags };
         }
         mutate((s) => {

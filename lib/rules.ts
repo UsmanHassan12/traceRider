@@ -4,6 +4,9 @@ import type { Attempt } from "./types";
 export const RULES = {
   minCalls: 2,
   maxDistanceM: 300,
+  /** false: the rider can save a return from anywhere; being farther than maxDistanceM (or having
+   *  no GPS) is only flagged for admin review. true: the rider must be at the address. */
+  distanceRequired: false,
   photoRequired: true,
   /** "block": the rider cannot save a return that fails a check.
    *  "flag": the return is saved but flagged for admin review. */
@@ -20,6 +23,12 @@ export const DEMO = process.env.NEXT_PUBLIC_DEMO === "true";
 
 /** Flags that are recorded for review but never block the rider. */
 export const NON_BLOCKING = ["Code typed, not scanned", "Address has no map pin"];
+
+/** Location flags ("Marked 2.4 km from address", "No GPS location"). */
+export const isDistanceFlag = (f: string) => f === "No GPS location" || / from address$/.test(f);
+
+/** True when this flag stops the rider saving (in "block" mode). */
+export const blocks = (f: string) => !NON_BLOCKING.includes(f) && (RULES.distanceRequired || !isDistanceFlag(f));
 
 export function flagsFor(a: Pick<Attempt, "outcome" | "calls" | "distanceM" | "photo" | "manualScan" | "customerReply" | "where">): string[] {
   const f: string[] = [];
