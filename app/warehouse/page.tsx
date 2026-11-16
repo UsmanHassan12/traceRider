@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { CashReceive, type CashTarget } from "@/components/CashReceive";
+import { DeskNav } from "@/components/DeskNav";
 import { Icon } from "@/components/Icon";
 import { LabelSheet } from "@/components/LabelSheet";
 import { Pager, usePaged } from "@/components/Pager";
@@ -10,6 +12,8 @@ import { QrScanner } from "@/components/QrScanner";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { useToast } from "@/components/Toast";
 import { fulfillInShopify } from "@/lib/api";
+import { parseCashCode } from "@/lib/cashCode";
+import { isToPick } from "@/lib/custody";
 import { ago, initials, pkr, time } from "@/lib/format";
 import { cashInHand, useStore } from "@/lib/store";
 import type { Parcel } from "@/lib/types";
@@ -20,16 +24,17 @@ const BATCH = 50; // labels per print run
 const PAGE = 12; // rows per page in each column
 
 export default function WarehouseDesk() {
-  const { ready, state, me, addTestOrder, printLabel, printLabels, handover, receiveReturn, takeBack, deposit, signOut } = useStore();
+  const { ready, state, me, addTestOrder, printLabel, printLabels, handover, receiveReturn, takeBack } = useStore();
   const toast = useToast();
   const [code, setCode] = useState("");
   const [riderId, setRiderId] = useState<string | null>(null);
   const [tray, setTray] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string[]>([]); // ticked rows in Ready to hand over
+  const [bulkTo, setBulkTo] = useState("");
   const [banner, setBanner] = useState<Banner>(null);
   const [printing, setPrinting] = useState<Parcel[] | null>(null);
-  const [cashFor, setCashFor] = useState<{ riderId: string; requestId?: string; declared?: number } | null>(null);
+  const [cashFor, setCashFor] = useState<CashTarget | null>(null);
   const [camOpen, setCamOpen] = useState(false);
-  const [cashCount, setCashCount] = useState("");
   const [q, setQ] = useState("");
   const input = useRef<HTMLInputElement>(null);
 
@@ -87,20 +92,14 @@ export default function WarehouseDesk() {
   /** One handler for the handheld scanner, the typed code and the camera. */
   function handleCode(raw: string) {
     if (!raw) return;
-    if (raw.startsWith("DEPOSIT|")) {
-      // DEPOSIT|<rider>|<declared amount>|<one-time code>
-      const [, rid, amt, reqId] = raw.split("|");
-      if (!state.riders.some((r) => r.id === rid)) {
-        setBanner({ tone: "bad", title: "Unknown rider on this cash code" });
-        return;
-      }
-      if (reqId && state.deposits.some((d) => d.requestId === reqId)) {
+    const cash = parseCashCode(raw, state.riders);
+    if (cash) {
+      if (!cash.ok) return setBanner({ tone: "bad", title: cash.message });
+      if (cash.requestId && state.deposits.some((d) => d.requestId === cash.requestId)) {
         setBanner({ tone: "bad", title: "This cash code was already used", sub: "Ask the rider to close it and tap Hand in cash again." });
         return;
       }
-      const declared = Number(amt);
-      setCashCount(reqId && declared > 0 ? String(declared) : "");
-      setCashFor({ riderId: rid, requestId: reqId || undefined, declared: reqId && declared >= 0 ? declared : undefined });
+      setCashFor({ riderId: cash.riderId, requestId: cash.requestId, declared: cash.declared });
       return;
     }
     const norm = raw.toUpperCase().replace(/^#/, "");
@@ -143,6 +142,22 @@ export default function WarehouseDesk() {
     void syncShopify(ids);
   }
 
+  /** Assign one or more ready parcels straight from the list, without the scan tray. */
+  function assign(trks: string[], to: string) {
+    const r = state.riders.find((x) => x.id === to);
+    if (!r || trks.length === 0) return;
+    const ids = handover(r.id, trks);
+    setTray((t) => t.filter((x) => !trks.includes(x)));
+    setPicked([]);
+    setBanner({
+      tone: "good",
+      title: `${ids.length} parcel${ids.length > 1 ? "s" : ""} assigned to ${r.name}`,
+      sub: `${r.name.split(" ")[0]} scans ${ids.length > 1 ? "them" : "it"} when picking up. Updating Shopify…`,
+      undo: ids.length === 1 ? () => { takeBack(ids[0]); setBanner(null); } : undefined,
+    });
+    void syncShopify(ids);
+  }
+
   function markPrinted(list: Parcel[]) {
     const ids = list.filter((p) => p.status === "new").map((p) => p.id);
     if (ids.length === 1) printLabel(ids[0]);
@@ -154,10 +169,10 @@ export default function WarehouseDesk() {
 
   const riderMeta = (id: string) => {
     const live = state.parcels.filter((p) => p.riderId === id && p.status === "out").length;
-    const handed = state.parcels.filter((p) => p.riderId === id && p.status === "handed").length;
+    const handed = state.parcels.filter((p) => p.riderId === id && isToPick(p)).length;
     const back = state.parcels.filter((p) => p.riderId === id && p.status === "returned").length;
     const bits = [`${live} live`];
-    if (handed) bits.push(`${handed} not scanned`);
+    if (handed) bits.push(`${handed} not picked up`);
     if (back) bits.push(`${back} return${back > 1 ? "s" : ""} to check in`);
     return bits.join(" · ");
   };
@@ -169,18 +184,7 @@ export default function WarehouseDesk() {
 
   return (
     <div className="wh">
-      <nav aria-label="Desk" className="wh-nav">
-        <Link href="/" aria-label="Home" className="logo">
-          <Icon name="box" size={22} stroke={2.2} />
-        </Link>
-        <span className="nav-item active"><Icon name="scan" size={22} />Dispatch</span>
-        {me?.role === "admin" && (
-          <Link href="/admin"><Icon name="grid" size={22} />Admin</Link>
-        )}
-        <button type="button" className="signout" onClick={() => signOut()}>
-          <Icon name="logout" size={22} />Sign out
-        </button>
-      </nav>
+      <DeskNav />
 
       <main className="wh-main">
         <div className="row between wrap" style={{ gap: 12 }}>
@@ -270,22 +274,44 @@ export default function WarehouseDesk() {
           <section className="wh-col" aria-labelledby="col-ready">
             <div className="wh-col-head">
               <h2 id="col-ready" style={{ fontSize: 14, color: "var(--ink)" }}>Ready to hand over <Count n={ready4.length} /></h2>
+              {pgReady.rows.length > 0 && (
+                <label className="row xs muted" style={{ gap: 6, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={pgReady.rows.every((p) => picked.includes(p.trk))}
+                    onChange={(e) => setPicked(e.target.checked ? Array.from(new Set([...picked, ...pgReady.rows.map((p) => p.trk)])) : picked.filter((t) => !pgReady.rows.some((p) => p.trk === t)))}
+                  />
+                  Select page
+                </label>
+              )}
             </div>
+            {picked.length > 0 && (
+              <div className="row wrap" style={{ gap: 6, background: "var(--navy-soft)", borderRadius: 10, padding: 8 }}>
+                <b className="small" style={{ color: "var(--navy)" }}>{picked.length} selected</b>
+                <select aria-label="Rider for the selected parcels" className="input" value={bulkTo} onChange={(e) => setBulkTo(e.target.value)} style={{ width: "auto", minHeight: 34, padding: "0 8px", flex: "1 1 120px" }}>
+                  <option value="">Choose rider…</option>
+                  {state.riders.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+                <button type="button" className="btn navy sm" disabled={!bulkTo} onClick={() => assign(picked, bulkTo)}>Assign</button>
+                <button type="button" className="btn ghost sm" onClick={() => setPicked([])}>Clear</button>
+              </div>
+            )}
             <div className="wh-list">
-              {ready4.length === 0 && <div className="small muted" style={{ padding: 6 }}>Nothing waiting.</div>}
+              {ready4.length === 0 && <div className="small muted" style={{ padding: 6 }}>Nothing waiting. Printed labels land here.</div>}
               {pgReady.rows.map((p) => (
-                <div key={p.id} className="wh-row">
-                  <div className="row" style={{ gap: 8, minWidth: 0 }}>
-                    <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.trk}</span>
-                    <span className="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.customer}</span>
-                  </div>
-                  <button type="button" className="act btn sm" onClick={() => addToTray(p)}>Add</button>
-                  <div className="sub">{p.area} · {pkr(p.cod)}</div>
-                </div>
+                <ReadyRow
+                  key={p.id}
+                  p={p}
+                  riders={state.riders}
+                  defaultRider={riderId ?? ""}
+                  checked={picked.includes(p.trk)}
+                  onCheck={(on) => setPicked((x) => (on ? [...x, p.trk] : x.filter((t) => t !== p.trk)))}
+                  onAssign={(to) => assign([p.trk], to)}
+                />
               ))}
             </div>
             <Pager {...pgReady} compact label="ready parcels" />
-            <div className="xs muted" style={{ padding: "0 4px" }}>Scan a box (or press Add) to put it in the handover.</div>
+            <div className="xs muted" style={{ padding: "0 4px" }}>Pick a rider on a parcel and press Assign, tick several to assign together, or scan boxes into the handover on the right.</div>
           </section>
 
           <section className="wh-col bad" aria-labelledby="col-ret">
@@ -357,9 +383,9 @@ export default function WarehouseDesk() {
           {rider ? `Confirm handover to ${rider.name.split(" ")[0]} (${tray.length})` : "Pick a rider"}
         </button>
         {rider && (
-          <button type="button" className="btn" onClick={() => { setCashCount(""); setCashFor({ riderId: rider.id }); }} style={{ flex: "none" }}>
-            <Icon name="cash" size={18} /> Receive cash · {pkr(cashInHand(state, rider.id).inHand)}
-          </button>
+          <Link href="/warehouse/cash" className="btn" style={{ flex: "none" }}>
+            <Icon name="cash" size={18} /> {rider.name.split(" ")[0]} holds {pkr(cashInHand(state, rider.id).inHand)} · Cash desk
+          </Link>
         )}
       </aside>
 
@@ -402,72 +428,51 @@ export default function WarehouseDesk() {
         </div>
       )}
 
-      {cashFor && (() => {
-        const r = state.riders.find((x) => x.id === cashFor.riderId);
-        const bal = cashInHand(state, cashFor.riderId);
-        const expected = bal.inHand;
-        const declared = cashFor.declared;
-        const counted = Math.max(0, Math.round(Number(cashCount.replace(/[^\d]/g, "")) || 0));
-        const vsDeclared = declared !== undefined ? counted - declared : counted - expected;
-        const deliveredToday = state.parcels.filter((p) => p.riderId === cashFor.riderId && p.status === "delivered" && p.attempt && new Date(p.attempt.at).toDateString() === new Date().toDateString()).length;
-        return (
-          <div className="overlay" onClick={(e) => e.target === e.currentTarget && setCashFor(null)}>
-            <div className="modal" role="dialog" aria-modal="true" aria-labelledby="cash-title" style={{ width: "min(500px, 100%)" }}>
-              <h2 id="cash-title">Cash handover</h2>
-              <div className="row" style={{ gap: 12, background: "var(--ground)", borderRadius: 12, padding: 12 }}>
-                <span className="avatar" style={{ width: 46, height: 46, fontSize: 15 }}>{initials(r?.name ?? "?")}</span>
-                <div className="grow">
-                  <div style={{ fontWeight: 600 }}>{r?.name}</div>
-                  <div className="xs muted">{[r?.id, r?.bike, r?.phone].filter(Boolean).join(" · ")}</div>
-                  <div className="xs muted">{deliveredToday} delivered today · {pkr(bal.collected)} COD today</div>
-                </div>
-                {cashFor.requestId ? <span className="pill good">Rider&apos;s code</span> : <span className="pill warn">No rider code</span>}
-              </div>
-              <div className="grid2">
-                <div className="tile">
-                  <div className="xs muted">{declared !== undefined ? "Rider declares" : "Rider hasn't declared"}</div>
-                  <div className="num" style={{ fontWeight: 700, fontSize: 22 }}>{declared !== undefined ? pkr(declared) : "—"}</div>
-                </div>
-                <div className="tile">
-                  <div className="xs muted">App expects</div>
-                  <div className="num" style={{ fontWeight: 700, fontSize: 22 }}>{pkr(expected)}</div>
-                </div>
-              </div>
-              {declared !== undefined && declared !== expected && (
-                <div className="xs" style={{ color: "var(--amber-ink)" }}>The rider&apos;s amount differs from the app by {pkr(Math.abs(declared - expected))}. Count carefully.</div>
-              )}
-              <div className="field">
-                <label htmlFor="cash-count">Amount you counted</label>
-                <input id="cash-count" className="input num" inputMode="numeric" autoFocus value={cashCount} onChange={(e) => setCashCount(e.target.value)} placeholder={String(declared ?? expected)} style={{ fontSize: 22, fontWeight: 600 }} />
-              </div>
-              {counted > 0 && vsDeclared !== 0 && (
-                <div className="small" style={{ color: vsDeclared < 0 ? "var(--red)" : "var(--amber-ink)" }}>
-                  {vsDeclared < 0 ? `${pkr(-vsDeclared)} less than ${declared !== undefined ? "the rider declared" : "expected"}.` : `${pkr(vsDeclared)} more than ${declared !== undefined ? "the rider declared" : "expected"}.`}{" "}
-                  The rider will be asked to accept or dispute it on their phone.
-                </div>
-              )}
-              {!cashFor.requestId && <div className="xs muted">Without the rider&apos;s code, the rider confirms the amount on their phone afterwards.</div>}
-              <div className="row wrap" style={{ justifyContent: "flex-end" }}>
-                <button type="button" className="btn" onClick={() => setCashFor(null)}>Cancel</button>
-                <button
-                  type="button"
-                  className="btn green"
-                  disabled={counted <= 0}
-                  onClick={() => {
-                    const res = deposit(cashFor.riderId, counted, cashFor.requestId ? { requestId: cashFor.requestId, declared: declared ?? counted } : undefined);
-                    if (!res.ok) return toast(res.message, "bad");
-                    setBanner({ tone: "good", title: `${pkr(counted)} received from ${r?.name}`, sub: res.message });
-                    setCashFor(null);
-                    input.current?.focus();
-                  }}
-                >
-                  Mark {pkr(counted)} received
-                </button>
-              </div>
-            </div>
+      {cashFor && (
+        <CashReceive
+          target={cashFor}
+          onClose={() => setCashFor(null)}
+          onDone={(msg) => {
+            setBanner({ tone: "good", title: msg });
+            setCashFor(null);
+            input.current?.focus();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A printed parcel waiting for a rider: tick box, rider dropdown and Assign. */
+function ReadyRow({ p, riders, defaultRider, checked, onCheck, onAssign }: {
+  p: Parcel;
+  riders: { id: string; name: string }[];
+  defaultRider: string;
+  checked: boolean;
+  onCheck: (on: boolean) => void;
+  onAssign: (riderId: string) => void;
+}) {
+  const [to, setTo] = useState(defaultRider);
+  useEffect(() => setTo((cur) => cur || defaultRider), [defaultRider]);
+  return (
+    <div className="wh-row" style={{ gridTemplateColumns: "auto minmax(0, 1fr)", alignItems: "start", background: checked ? "var(--navy-soft)" : "#fff" }}>
+      <input type="checkbox" aria-label={`Select ${p.trk}`} checked={checked} onChange={(e) => onCheck(e.target.checked)} style={{ marginTop: 4 }} />
+      <div className="stack" style={{ gap: 6, minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
+          <div className="row" style={{ gap: 8, minWidth: 0 }}>
+            <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.trk}</span>
+            <span className="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.customer}</span>
           </div>
-        );
-      })()}
+          <div className="xs muted" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.area} · {p.cod ? pkr(p.cod) : "Prepaid"}</div>
+        </div>
+        <div className="row" style={{ gap: 6 }}>
+          <select aria-label={`Rider for ${p.trk}`} className="input" value={to} onChange={(e) => setTo(e.target.value)} style={{ minHeight: 34, padding: "0 8px", flex: 1, minWidth: 0, fontSize: 13 }}>
+            <option value="">Assign to rider…</option>
+            {riders.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+          <button type="button" className="btn navy sm" disabled={!to} onClick={() => onAssign(to)}>Assign</button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 import type { Session } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fromDeposit, fromEvent, fromParcel, sameEvent, toDeposit, toEvent, toParcel, toRider, type DepositRow, type EventRow, type ParcelRow, type RiderRow } from "./db";
+import { PICKED, pickedAt } from "./custody";
 import { blocks, flagsFor, RULES } from "./rules";
 import { makeParcel, seedState } from "./seed";
 import { configured, sb } from "./supabase";
@@ -43,6 +44,9 @@ interface Store {
   /** Admin: delete a test or sample parcel (never a real Shopify order). */
   deleteParcel: (id: string) => Promise<Result>;
   receiveReturn: (trk: string) => Result;
+  /** Rider scans a parcel at the warehouse: confirms he has the box. Does not start delivery. */
+  pickUp: (code: string, riderId: string, manual: boolean) => Result;
+  /** Rider starts delivering a parcel he has already picked up. */
   startRide: (code: string, riderId: string, manual: boolean) => Result;
   logCall: (id: string) => void;
   deliver: (id: string, input: { otp: string; distanceM: number; photo?: string; where?: { lat: number; lng: number; acc: number } }) => Result;
@@ -507,7 +511,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       takeBack: (id) => {
         const p0 = ref.current.parcels.find((x) => x.id === id);
         if (!p0) return { ok: false, message: "Parcel not found." };
-        if (p0.status !== "handed") return { ok: false, message: "Only parcels the rider has not scanned yet can be taken back." };
+        if (p0.status !== "handed") return { ok: false, message: "Only parcels that are not out for delivery can be taken back." };
         mutate((s) => {
           const p = s.parcels.find((x) => x.id === id)!;
           const from = riderName(s, p.riderId);
@@ -571,6 +575,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return { ok: true, message: `Return ${p0.trk} checked in.` };
       },
 
+      pickUp: (code, riderId, manual) => {
+        const s0 = ref.current;
+        const norm = code.trim().toUpperCase();
+        const p0 = s0.parcels.find((x) => x.trk.toUpperCase() === norm);
+        if (!p0) return { ok: false, message: `No parcel has code ${code}. Check the label.` };
+        if (p0.status === "new" || p0.status === "labeled") return { ok: false, message: `${p0.trk} has not been assigned to a rider yet. Ask the desk to assign it to you first.` };
+        if (p0.riderId !== riderId) return { ok: false, message: `${p0.trk} is assigned to ${riderName(s0, p0.riderId)}, not you. Give it back to the desk.` };
+        if (p0.status === "out") return { ok: false, message: `${p0.trk} is already out for delivery.` };
+        if (p0.status !== "handed") return { ok: false, message: `${p0.trk} is already closed (${p0.status}).` };
+        if (pickedAt(p0)) return { ok: true, message: `${p0.trk} was already scanned.`, parcel: p0 };
+        const parcel = mutate((s) => {
+          const p = s.parcels.find((x) => x.id === p0.id)!;
+          p.manualScan = manual;
+          p.events.push({ at: Date.now(), what: manual ? `${PICKED} · code typed (no QR scan)` : `${PICKED} · QR scanned`, by: riderName(s, riderId) });
+          return p;
+        });
+        return { ok: true, message: `${p0.trk} picked up`, parcel };
+      },
+
       startRide: (code, riderId, manual) => {
         const s0 = ref.current;
         const p0 = s0.parcels.find((x) => x.trk.toUpperCase() === code.trim().toUpperCase());
@@ -578,15 +601,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (p0.riderId !== riderId) return { ok: false, message: `${p0.trk} was handed to ${riderName(s0, p0.riderId)}, not you.` };
         if (p0.status === "out") return { ok: true, message: `${p0.trk} is already on a live ride.`, parcel: p0 };
         if (p0.status !== "handed") return { ok: false, message: `${p0.trk} is already closed.` };
+        if (!pickedAt(p0)) return { ok: false, message: `Scan ${p0.trk} at the warehouse first to confirm you have the box.` };
         const parcel = mutate((s) => {
           const p = s.parcels.find((x) => x.id === p0.id)!;
           p.status = "out";
           p.rideStartedAt = Date.now();
-          p.manualScan = manual;
-          p.events.push({ at: Date.now(), what: manual ? "Code typed in (no QR scan), ride started" : "QR scanned, ride started", by: riderName(s, riderId) });
+          p.manualScan = p.manualScan || manual;
+          p.events.push({ at: Date.now(), what: "Delivery started", by: riderName(s, riderId) });
           return p;
         });
-        return { ok: true, message: "Parcel matched", parcel };
+        return { ok: true, message: "Delivery started", parcel };
       },
 
       logCall: (id) =>

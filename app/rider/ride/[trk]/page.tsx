@@ -43,7 +43,7 @@ export default function RidePage() {
   if (p.status !== "out") {
     return (
       <div className="phone-main">
-        <div className="empty">This ride is closed ({p.status}).</div>
+        <div className="empty">{p.status === "handed" ? "This delivery hasn't started yet. Start it from Home when you set off." : `This ride is closed (${p.status}).`}</div>
         <Link href="/rider" className="btn">Back to home</Link>
       </div>
     );

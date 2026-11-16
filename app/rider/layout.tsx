@@ -7,8 +7,8 @@ import { RoleGate } from "@/components/RoleGate";
 
 const TABS = [
   { href: "/rider", label: "Home", icon: "home" as const },
-  { href: "/rider/parcels", label: "Parcels", icon: "box" as const },
-  { href: "/rider/scan", label: "Scan", icon: "scan" as const, fab: true },
+  { href: "/rider/live", label: "Live rides", icon: "nav" as const },
+  { href: "/rider/scan", label: "Pick up", icon: "scan" as const, fab: true },
   { href: "/rider/cash", label: "Cash", icon: "cash" as const },
   { href: "/rider/profile", label: "Profile", icon: "user" as const },
 ];

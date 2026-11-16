@@ -102,11 +102,14 @@ Open the file, copy everything inside it, paste into a new query and Run (don't 
 
 ## Daily flow
 
-1. **Warehouse**: Print label → paste on box → pick rider → scan boxes into the handover → Confirm handover.
-2. **Rider**: Scan parcel QR → Start ride → **Delivered** (handover photo) or **Can't deliver**
-   (reason + 2 calls from the app + doorstep photo + within 300 m of the address).
-3. **Warehouse**: scan returned boxes to check them in; scan the rider's cash code to record the deposit.
-4. **Admin**: daily numbers, return rate per rider vs team, flagged returns with evidence and a decision.
+1. **Warehouse › Dispatch**: Print label → paste on box → in *Ready to hand over*, pick a rider in the dropdown → **Assign**
+   (or tick several and assign together, or scan boxes into the handover on the right).
+2. **Rider › Pick up**: scan every box assigned to him. Scanning only confirms he has the box.
+3. **Rider › Home**: all his parcels in delivery order (nearest first). Tap **Start delivery** on a parcel when he sets off;
+   it moves to **Live rides**. Then **Delivered** (handover photo) or **Can't deliver** (reason + 2 calls + doorstep photo).
+4. **Warehouse › Returns**: scan returned boxes to check them in; see each return's reason and proof, and the track record by date.
+5. **Warehouse › Cash**: scan the rider's cash QR and count the notes. Pick a date to see cash on any past day.
+6. **Admin**: daily numbers, return rate per rider vs team, flagged returns, and **Export CSV** for any date range.
 
 ## Archive
 

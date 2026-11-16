@@ -1,7 +1,7 @@
 export type ParcelStatus =
   | "new" // synced from Shopify, no label yet
   | "labeled" // label printed and pasted, waiting at the desk
-  | "handed" // handed to a rider, rider has not scanned it yet
+  | "handed" // assigned to a rider; picked up once he scans it (see lib/custody.ts), not out yet
   | "out" // rider scanned it, ride is live
   | "delivered"
   | "returned" // rider marked it returned, parcel on its way back

@@ -188,6 +188,10 @@ table.data td { padding: 11px 10px; border-bottom: 1px solid #eef1f5; vertical-a
 .wh-side { min-height: 0; background: #fff; border-left: 1px solid var(--line); padding: 18px; display: flex; flex-direction: column; gap: 12px; overflow: hidden; }
 .wh-riders { display: flex; flex-direction: column; gap: 6px; max-height: 36%; overflow-y: auto; flex: none; }
 .wh-tray { flex: 1; min-height: 80px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+/* desk pages without the handover panel (Cash) */
+.wh.no-side { grid-template-columns: 84px minmax(0, 1fr); }
+.wh-page { min-width: 0; min-height: 0; overflow-y: auto; padding: 18px 22px 40px; display: flex; flex-direction: column; gap: 16px; }
+.wh-page > * { flex: none; }
 
 @media (max-width: 1100px) {
   .wh { grid-template-columns: 84px minmax(0, 1fr); grid-template-rows: auto auto; height: auto; min-height: 100dvh; overflow: visible; }
@@ -197,6 +201,9 @@ table.data td { padding: 11px 10px; border-bottom: 1px solid #eef1f5; vertical-a
   .wh-riders { max-height: 260px; }
   .wh-tray { max-height: 320px; }
   .wh-list { max-height: 55vh; }
+  .wh.no-side { grid-template-rows: auto; }
+  .wh.no-side .wh-nav { grid-row: auto; }
+  .wh-page { overflow: visible; }
 }
 @media (max-width: 760px) {
   .wh { grid-template-columns: minmax(0, 1fr); }
@@ -207,6 +214,8 @@ table.data td { padding: 11px 10px; border-bottom: 1px solid #eef1f5; vertical-a
   .wh-main { padding: 14px 16px; }
   .wh-cols { grid-template-columns: minmax(0, 1fr); }
   .wh-side { grid-column: 1; padding: 16px; }
+  .wh.no-side { grid-template-columns: minmax(0, 1fr); }
+  .wh-page { padding: 14px 16px 32px; }
   .wh-list { max-height: 50vh; }
 }
 

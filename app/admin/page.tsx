@@ -1,27 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { dayKey, initials, pkr, time } from "@/lib/format";
+import { useToast } from "@/components/Toast";
+import { dayKey, initials, pkr, STATUS, time } from "@/lib/format";
+import { closedBetween, createdBetween, dayEnd, dayStart, downloadCsv } from "@/lib/history";
 import { useState } from "react";
+import { isReady, isToPick } from "@/lib/custody";
 import { cashInHand, useStore } from "@/lib/store";
-import type { ReturnReason } from "@/lib/types";
+import type { Parcel, ReturnReason } from "@/lib/types";
 
 const REASONS: ReturnReason[] = ["Customer not available", "Phone switched off", "Customer refused parcel", "Wrong or incomplete address", "Customer asked to reschedule"];
 
-function downloadCsv(rows: (string | number)[][], name: string) {
-  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 export default function AdminOverview() {
   const { state } = useStore();
+  const toast = useToast();
   const todayKey = dayKey(Date.now());
   const [day, setDay] = useState(todayKey);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exFrom, setExFrom] = useState(todayKey);
+  const [exTo, setExTo] = useState(todayKey);
+  const [exporting, setExporting] = useState(false);
   const isToday = day === todayKey;
   const onDay = (t?: number) => t !== undefined && dayKey(t) === day;
   const minDay = dayKey(Date.now() - 9 * 864e5); // the app keeps the last 10 days loaded
@@ -62,19 +61,47 @@ export default function AdminOverview() {
   const custody = [
     { label: "Waiting for a label", n: state.parcels.filter((p) => p.status === "new").length, bg: "var(--ground)", fg: "var(--ink)" },
     { label: "Ready for handover", n: state.parcels.filter((p) => p.status === "labeled").length, bg: "var(--ground)", fg: "var(--ink)" },
-    { label: "Handed over, rider hasn't scanned", n: state.parcels.filter((p) => p.status === "handed").length, bg: "var(--amber-soft)", fg: "var(--amber-ink)" },
+    { label: "Assigned, rider hasn't picked up", n: state.parcels.filter(isToPick).length, bg: "var(--amber-soft)", fg: "var(--amber-ink)" },
+    { label: "Picked up, delivery not started", n: state.parcels.filter(isReady).length, bg: "var(--ground)", fg: "var(--ink)" },
     { label: "Out for delivery", n: onRoad, bg: "var(--navy-soft)", fg: "var(--navy)" },
     { label: "Returns not yet back at warehouse", n: state.parcels.filter((p) => p.status === "returned").length, bg: "var(--red-soft)", fg: "var(--red)" },
   ];
 
-  function exportDay() {
-    downloadCsv(
-      [
-        ["Order", "Tracking", "Customer", "Area", "Rider", "Outcome", "Reason", "Time", "COD", "Calls", "Distance m", "Flags"],
-        ...closed.map((p) => [p.id, p.trk, p.customer, p.area, state.riders.find((r) => r.id === p.riderId)?.name ?? "", p.attempt!.outcome, p.attempt!.reason ?? "", time(p.attempt!.at), p.cod, p.attempt!.calls, p.attempt!.distanceM, p.flags.join("; ")]),
-      ],
-      `rider-trace-${day}.csv`
-    );
+  /** Every order that arrived or was closed between the two dates, read from the database. */
+  async function exportRange() {
+    if (!exFrom || !exTo || exFrom > exTo) return toast("Pick a From date on or before the To date.", "bad");
+    setExporting(true);
+    try {
+      const a = dayStart(exFrom);
+      const b = dayEnd(exTo);
+      const [created, closedIn] = await Promise.all([createdBetween(a, b), closedBetween(a, b)]);
+      const rows = new Map<string, Parcel>();
+      for (const p of [...created, ...closedIn]) rows.set(p.id, p);
+      const list = Array.from(rows.values()).sort((x, y) => x.createdAt - y.createdAt);
+      if (list.length === 0) {
+        toast("No orders in those dates.", "plain");
+        return;
+      }
+      const stamp = (t?: number) => (t ? new Date(t).toLocaleString("en-PK") : "");
+      downloadCsv(
+        [
+          ["Order", "Tracking", "Arrived", "Customer", "Phone", "Address", "Area", "Rider", "Status", "Outcome", "Reason", "Closed at", "COD", "Calls", "Distance m", "Flags", "Shopify"],
+          ...list.map((p) => [
+            p.id, p.trk, stamp(p.createdAt), p.customer, p.phone, p.address, p.area,
+            state.riders.find((r) => r.id === p.riderId)?.name ?? "", STATUS[p.status]?.label ?? p.status,
+            p.attempt?.outcome ?? "", p.attempt?.reason ?? "", stamp(p.attempt?.at), p.cod,
+            p.attempt?.calls ?? "", p.attempt ? p.attempt.distanceM : "", p.flags.join("; "), p.shopifySync ?? "",
+          ]),
+        ],
+        exFrom === exTo ? `rider-trace-${exFrom}.csv` : `rider-trace-${exFrom}-to-${exTo}.csv`
+      );
+      toast(`${list.length} orders exported.`, "good");
+      setExportOpen(false);
+    } catch (e) {
+      toast(`Export failed: ${(e as Error).message}`, "bad");
+    } finally {
+      setExporting(false);
+    }
   }
 
   const tile = { background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column" as const, gap: 6 };
@@ -91,7 +118,7 @@ export default function AdminOverview() {
           <label htmlFor="ov-day" className="sr-only">Day</label>
           <input id="ov-day" type="date" className="input" value={day} min={minDay} max={todayKey} onChange={(e) => setDay(e.target.value || todayKey)} style={{ width: "auto", minHeight: 44 }} />
           {!isToday && <button type="button" className="btn" onClick={() => setDay(todayKey)}>Today</button>}
-          <button type="button" className="btn navy" onClick={exportDay}>Export day (CSV)</button>
+          <button type="button" className="btn navy" onClick={() => { setExFrom(day); setExTo(day); setExportOpen(true); }}>Export CSV</button>
         </div>
       </div>
 
@@ -222,6 +249,39 @@ export default function AdminOverview() {
           <div className="xs muted">Every parcel sits with exactly one person at a time: warehouse, rider, or customer.</div>
         </section>
       </div>
+
+      {exportOpen && (
+        <div className="overlay" onClick={(e) => e.target === e.currentTarget && !exporting && setExportOpen(false)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="ex-title" style={{ width: "min(440px, 100%)" }}>
+            <h2 id="ex-title">Export orders (CSV)</h2>
+            <div className="small muted">Every order that arrived or was delivered or returned between these dates, with rider, outcome, reason, COD and flags. Opens in Excel or Google Sheets.</div>
+            <div className="grid2">
+              <div className="field">
+                <label htmlFor="ex-from">From</label>
+                <input id="ex-from" type="date" className="input" value={exFrom} max={exTo} onChange={(e) => setExFrom(e.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor="ex-to">To</label>
+                <input id="ex-to" type="date" className="input" value={exTo} min={exFrom} max={todayKey} onChange={(e) => setExTo(e.target.value)} />
+              </div>
+            </div>
+            <div className="row wrap" style={{ gap: 6 }}>
+              {([
+                ["Today", 0],
+                ["Last 7 days", 6],
+                ["Last 30 days", 29],
+              ] as [string, number][]).map(([l, n]) => (
+                <button key={l} type="button" className="chip" onClick={() => { setExFrom(dayKey(Date.now() - n * 864e5)); setExTo(todayKey); }}>{l}</button>
+              ))}
+              <button type="button" className="chip" onClick={() => { const d = new Date(); setExFrom(dayKey(new Date(d.getFullYear(), d.getMonth(), 1).getTime())); setExTo(todayKey); }}>This month</button>
+            </div>
+            <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+              <button type="button" className="btn" onClick={() => setExportOpen(false)} disabled={exporting}>Cancel</button>
+              <button type="button" className="btn navy" onClick={exportRange} disabled={exporting}>{exporting ? "Preparing…" : "Download CSV"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

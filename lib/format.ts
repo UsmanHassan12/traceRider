@@ -32,7 +32,7 @@ export const initials = (name: string) =>
 export const STATUS: Record<ParcelStatus, { label: string; tone: "info" | "warn" | "good" | "bad" }> = {
   new: { label: "Needs label", tone: "info" },
   labeled: { label: "Ready for handover", tone: "info" },
-  handed: { label: "Not scanned by rider", tone: "warn" },
+  handed: { label: "Assigned to rider", tone: "warn" },
   out: { label: "Out for delivery", tone: "info" },
   delivered: { label: "Delivered", tone: "good" },
   returned: { label: "Returned, coming back", tone: "bad" },

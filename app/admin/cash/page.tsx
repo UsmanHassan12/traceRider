@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { CashOnDate } from "@/components/CashOnDate";
 import { Icon } from "@/components/Icon";
+import { ymd } from "@/lib/history";
 import { Pager, usePaged } from "@/components/Pager";
 import { useToast } from "@/components/Toast";
 import { initials, pkr, time } from "@/lib/format";
@@ -16,6 +18,8 @@ export default function CashPage() {
   const [filter, setFilter] = useState<Filter>("attention");
   const [resolving, setResolving] = useState<Deposit | null>(null);
   const [note, setNote] = useState("");
+  const todayKey = ymd(Date.now());
+  const [viewDay, setViewDay] = useState(todayKey);
 
   const riderName = (id: string) => state.riders.find((r) => r.id === id)?.name ?? id;
   const today = new Date().toDateString();
@@ -61,10 +65,19 @@ export default function CashPage() {
 
   return (
     <main className="adm-main">
-      <div>
-        <h1 style={{ fontSize: 26 }}>Cash</h1>
-        <div className="small muted">COD each rider is holding, and every handover at the warehouse with both sides&apos; amounts.</div>
+      <div className="row between wrap" style={{ gap: 12, alignItems: "flex-end" }}>
+        <div>
+          <h1 style={{ fontSize: 26 }}>Cash</h1>
+          <div className="small muted">COD each rider is holding, and every handover at the warehouse with both sides&apos; amounts.</div>
+        </div>
+        <div className="row wrap" style={{ gap: 8 }}>
+          <label htmlFor="acash-day" className="xs muted">Cash on</label>
+          <input id="acash-day" type="date" className="input" value={viewDay} max={todayKey} onChange={(e) => setViewDay(e.target.value || todayKey)} style={{ width: "auto", minHeight: 42 }} />
+          {viewDay !== todayKey && <button type="button" className="btn" onClick={() => setViewDay(todayKey)}>Back to today</button>}
+        </div>
       </div>
+
+      {viewDay !== todayKey ? <CashOnDate day={viewDay} /> : <>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }} className="num">
         <div style={tile}><span className="xs muted">Cash with riders now</span><span style={{ fontSize: 26, fontWeight: 700 }}>{pkr(withRiders)}</span></div>
@@ -150,6 +163,7 @@ export default function CashPage() {
           <Pager {...pgB} compact label="riders" />
         </section>
       </div>
+      </>}
 
       {resolving && (
         <div className="overlay" onClick={(e) => e.target === e.currentTarget && setResolving(null)}>
