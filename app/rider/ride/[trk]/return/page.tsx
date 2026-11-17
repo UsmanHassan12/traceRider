@@ -31,7 +31,7 @@ function Check({ ok, title, children }: { ok: boolean; title: string; children?:
 export default function ReturnPage() {
   const { trk } = useParams<{ trk: string }>();
   const code = decodeURIComponent(trk);
-  const { state, rider, logCall, markReturn } = useRider();
+  const { state, rider, logCall, markReturn, markReattempt } = useRider();
   const router = useRouter();
   const toast = useToast();
   const p = state.parcels.find((x) => x.trk === code);
@@ -60,16 +60,24 @@ export default function ReturnPage() {
   // location is advisory when not required: amber instead of red, and it never blocks saving
   const locTone = near ? "ok" : RULES.distanceRequired ? "fail" : "warn";
 
-  async function save() {
+  async function save(kind: "return" | "reattempt") {
     if (!reason) return;
     setSaving(true);
     const stored = await storeProof(p!.id, photo);
     setSaving(false);
-    const r = markReturn(p!.id, { reason, distanceM: noPin ? -1 : distance ?? 99999, photo: stored, where: here ?? undefined });
+    const input = { reason, distanceM: noPin ? -1 : distance ?? 99999, photo: stored, where: here ?? undefined };
+    if (kind === "reattempt") {
+      const r = markReattempt(p!.id, input);
+      if (!r.ok) return toast(r.message, "bad");
+      toast(r.message, "good");
+      return router.replace("/rider");
+    }
+    const r = markReturn(p!.id, input);
     if (!r.ok) return toast(r.message, "bad");
     toast(r.message, r.flags && r.flags.length ? "bad" : "good");
     router.replace("/rider");
   }
+  const tries = (p.attempts?.length ?? 0) + 1;
 
   return (
     <>
@@ -84,7 +92,9 @@ export default function ReturnPage() {
       </div>
 
       <div className="phone-main" style={{ paddingBottom: 32 }}>
-        <div className="small muted">A return is saved only when all four checks pass.</div>
+        <div className="small muted">
+          {tries > 1 ? `Attempt ${tries} for this parcel. ` : ""}Pick a reason, then choose: <b>Reattempt</b> keeps the parcel with you to try again later; <b>Return</b> sends it back to the warehouse for good.
+        </div>
 
         <Check ok={!!reason} title="Reason">
           <div className="row wrap" style={{ gap: 6 }}>
@@ -146,9 +156,25 @@ export default function ReturnPage() {
           {isDemo && <DemoDistance value={demo} onChange={setDemo} gps={gps} />}
         </section>
 
-        <button type="button" className="btn red xl" disabled={!canSave || saving} onClick={save} style={{ marginTop: 6 }}>
-          {canSave ? "Confirm return" : `Confirm return · ${passed} of ${checks.length} checks`}
-        </button>
+        <section className="card stack" style={{ borderRadius: 14, gap: 10, marginTop: 6 }}>
+          <div>
+            <div style={{ fontWeight: 600 }}>Try again later</div>
+            <div className="xs muted">The parcel stays with you and comes back to your list as a reattempt. Your calls, photo and location for this try are saved.</div>
+          </div>
+          <button type="button" className="btn navy xl" disabled={!reason || saving} onClick={() => save("reattempt")}>
+            <Icon name="undo" size={18} /> {reason ? "Reattempt later" : "Pick a reason to reattempt"}
+          </button>
+        </section>
+
+        <section className="card stack" style={{ borderRadius: 14, gap: 10 }}>
+          <div>
+            <div style={{ fontWeight: 600 }}>Return to warehouse</div>
+            <div className="xs muted">Final. You can&apos;t deliver this parcel again after this. Needs all the checks above.</div>
+          </div>
+          <button type="button" className="btn red xl" disabled={!canSave || saving} onClick={() => save("return")}>
+            {canSave ? "Confirm return" : `Confirm return · ${passed} of ${checks.length} checks`}
+          </button>
+        </section>
       </div>
     </>
   );

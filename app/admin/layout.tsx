@@ -31,6 +31,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     { href: "/admin/cash", label: "Cash", icon: "cash", badge: cashIssues, tone: "red" },
     { href: "/admin/archive", label: "Archive", icon: "archive" },
     { href: "/admin/staff", label: "Staff & riders", icon: "users" },
+    { href: "/admin/settings", label: "Settings", icon: "mail" },
     { href: "/warehouse", label: "Warehouse desk", icon: "printer" },
   ];
 

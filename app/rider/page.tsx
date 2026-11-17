@@ -7,7 +7,7 @@ import { Icon } from "@/components/Icon";
 import { Pager, usePaged } from "@/components/Pager";
 import { StopBadge } from "@/components/StopBadge";
 import { useToast } from "@/components/Toast";
-import { isReady, isToPick } from "@/lib/custody";
+import { isReady, isReattempt, isToPick, reattempts } from "@/lib/custody";
 import { ago, initials, isToday, pkr, time } from "@/lib/format";
 import { routeLink } from "@/lib/route";
 import { cashInHand } from "@/lib/store";
@@ -176,6 +176,8 @@ function ParcelCard({ p, stop, onStart }: { p: Parcel; stop: number | null; onSt
   const pick = isToPick(p);
   const pill = p.status === "out" ? (
     <span className="pill info">On the way · {ago(p.rideStartedAt ?? Date.now())}</span>
+  ) : ready && isReattempt(p) ? (
+    <span className="pill warn">Reattempt · try {reattempts(p) + 1}</span>
   ) : ready ? (
     <span className="pill good">Picked up</span>
   ) : pick ? (
@@ -201,6 +203,11 @@ function ParcelCard({ p, stop, onStart }: { p: Parcel; stop: number | null; onSt
         <span className="num" style={{ fontWeight: 700 }}>{p.cod ? pkr(p.cod) : "Prepaid"}</span>
       </div>
       {p.attempt?.reason && <div className="xs" style={{ color: "var(--red)" }}>{p.attempt.reason}</div>}
+      {isReattempt(p) && (
+        <div className="xs" style={{ color: "var(--amber-ink)" }}>
+          Last try {time(p.attempts![p.attempts!.length - 1].at)}: {p.attempts![p.attempts!.length - 1].reason}
+        </div>
+      )}
     </>
   );
   const style = { textDecoration: "none", color: "var(--ink)", display: "flex", flexDirection: "column" as const, gap: 8, borderRadius: 14 };
@@ -212,7 +219,7 @@ function ParcelCard({ p, stop, onStart }: { p: Parcel; stop: number | null; onSt
       {body}
       {ready && (
         <div className="row" style={{ gap: 8 }}>
-          <button type="button" className="btn red grow" onClick={() => onStart(p)}><Icon name="nav" size={18} /> Start delivery</button>
+          <button type="button" className="btn red grow" onClick={() => onStart(p)}><Icon name="nav" size={18} /> {isReattempt(p) ? "Start delivery again" : "Start delivery"}</button>
         </div>
       )}
     </div>

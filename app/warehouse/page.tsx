@@ -13,7 +13,7 @@ import { LoadingScreen } from "@/components/LoadingScreen";
 import { useToast } from "@/components/Toast";
 import { fulfillInShopify } from "@/lib/api";
 import { parseCashCode } from "@/lib/cashCode";
-import { isToPick } from "@/lib/custody";
+import { isToPick, reattempts } from "@/lib/custody";
 import { ago, initials, pkr, time } from "@/lib/format";
 import { cashInHand, useStore } from "@/lib/store";
 import type { Parcel } from "@/lib/types";
@@ -53,6 +53,13 @@ export default function WarehouseDesk() {
   const pgLabel = usePaged(toLabelShown, PAGE, q);
   const pgReady = usePaged(ready4, PAGE, q);
   const pgRet = usePaged(returning, PAGE, q);
+  // parcels a rider marked "reattempt": still with him, waiting for another try or out again
+  const reattempting = state.parcels
+    .filter((p) => reattempts(p) > 0 && (p.status === "handed" || p.status === "out"))
+    .filter(match)
+    .sort((a, b) => b.attempts![b.attempts!.length - 1].at - a.attempts![a.attempts!.length - 1].at);
+  const pgRe = usePaged(reattempting, PAGE, q);
+  const [thirdCol, setThirdCol] = useState<"returns" | "reattempts">("returns");
 
   if (!ready) return <LoadingScreen />;
 
@@ -315,10 +322,41 @@ export default function WarehouseDesk() {
             <div className="xs muted" style={{ padding: "0 4px" }}>Pick a rider on a parcel and press Assign, tick several to assign together, or scan boxes into the handover on the right.</div>
           </section>
 
-          <section className="wh-col bad" aria-labelledby="col-ret">
-            <div className="wh-col-head">
-              <h2 id="col-ret" style={{ fontSize: 14, color: "var(--red)" }}>Returns coming back <Count n={returning.length} bad /></h2>
+          <section className={`wh-col${thirdCol === "returns" ? " bad" : ""}`} aria-labelledby="col-ret">
+            <div className="wh-col-head" role="tablist" aria-label="Returns and reattempts" style={{ gap: 6, justifyContent: "flex-start" }}>
+              <button type="button" role="tab" aria-selected={thirdCol === "returns"} className="chip" aria-pressed={thirdCol === "returns"} onClick={() => setThirdCol("returns")} style={{ fontSize: 13 }}>
+                <span id="col-ret" style={{ color: "var(--red)", fontWeight: 600 }}>Returns</span> <Count n={returning.length} bad />
+              </button>
+              <button type="button" role="tab" aria-selected={thirdCol === "reattempts"} className="chip" aria-pressed={thirdCol === "reattempts"} onClick={() => setThirdCol("reattempts")} style={{ fontSize: 13 }}>
+                <span style={{ color: "var(--amber-ink)", fontWeight: 600 }}>Reattempts</span> <Count n={reattempting.length} />
+              </button>
             </div>
+            {thirdCol === "reattempts" ? (
+              <>
+                <div className="wh-list">
+                  {reattempting.length === 0 && <div className="small muted" style={{ padding: 6 }}>No parcels marked for reattempt.</div>}
+                  {pgRe.rows.map((p) => {
+                    const last = p.attempts![p.attempts!.length - 1];
+                    return (
+                      <div key={p.id} className="wh-row" style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}>
+                        <div className="row" style={{ gap: 8, minWidth: 0 }}>
+                          <span className="mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{p.trk}</span>
+                          <span className="small" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.customer}</span>
+                        </div>
+                        <span className={`pill ${p.status === "out" ? "info" : "warn"}`} style={{ fontSize: 11 }}>{p.status === "out" ? "Out again" : `Try ${reattempts(p) + 1} pending`}</span>
+                        <div className="sub" style={{ gridColumn: "1 / -1" }}>
+                          {state.riders.find((r) => r.id === p.riderId)?.name ?? "—"} · {last.reason} · {reattempts(p)} failed tr{reattempts(p) === 1 ? "y" : "ies"}, last {time(last.at)}
+                          {last.flags.length > 0 && <span className="flag" style={{ marginLeft: 6 }}>Flagged</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <Pager {...pgRe} compact label="reattempts" />
+                <div className="xs muted" style={{ padding: "0 4px" }}>Riders keep these parcels and try again. They leave this list once delivered or returned.</div>
+              </>
+            ) : (
+            <>
             <div className="wh-list">
               {returning.length === 0 && <div className="small muted" style={{ padding: 6 }}>No returns on the way.</div>}
               {pgRet.rows.map((p) => (
@@ -333,6 +371,8 @@ export default function WarehouseDesk() {
               ))}
             </div>
             <Pager {...pgRet} compact label="returns" />
+            </>
+            )}
           </section>
         </div>
       </main>

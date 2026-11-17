@@ -1,4 +1,4 @@
-import type { Attempt, CustodyEvent, Deposit, Parcel, ParcelStatus, Review, Rider } from "./types";
+import type { Attempt, CustodyEvent, Deposit, Parcel, ParcelStatus, Review, Rider, Reattempt } from "./types";
 
 /** Row shapes as stored in Supabase, and converters to the app's types. */
 
@@ -22,6 +22,7 @@ export interface ParcelRow {
   manual_scan: boolean;
   calls: number[] | null;
   attempt: Attempt | null;
+  attempts?: Reattempt[] | null;
   flags: string[] | null;
   review: Review | null;
   is_sample: boolean;
@@ -86,6 +87,7 @@ export function toParcel(r: ParcelRow, events: CustodyEvent[]): Parcel {
     manualScan: r.manual_scan,
     calls: Array.isArray(r.calls) ? r.calls : [],
     attempt: r.attempt ?? undefined,
+    attempts: r.attempts?.length ? r.attempts : undefined,
     flags: r.flags ?? [],
     review: r.review ?? undefined,
     isSample: r.is_sample,
@@ -117,6 +119,8 @@ export function fromParcel(p: Parcel): ParcelRow {
     manual_scan: !!p.manualScan,
     calls: p.calls,
     attempt: p.attempt ?? null,
+    // only sent once there is a reattempt, so databases without update 007 keep working
+    ...(p.attempts?.length ? { attempts: p.attempts } : {}),
     flags: p.flags,
     review: p.review ?? null,
     is_sample: !!p.isSample,

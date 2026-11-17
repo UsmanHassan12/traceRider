@@ -98,6 +98,7 @@ when Shopify has one; without it the location check is skipped and noted on the 
 | `supabase/migrations/004_cash_handover.sql` | Two-sided cash handover: rider's declared amount, one-time QR, accept / dispute |
 | `supabase/migrations/005_archive.sql` | **Archived** status: orders not delivered within 7 days move to Admin › Archive every night |
 | `supabase/migrations/006_licence_expiry.sql` | Driving licence expiry date for each rider (the licence field holds the number) |
+| `supabase/migrations/007_reattempts_daily_report.sql` | Reattempt history on each parcel, settings table, and the 15-minute check for the daily email |
 
 Open the file, copy everything inside it, paste into a new query and Run (don't paste the file name).
 
@@ -118,6 +119,16 @@ An order that is still not delivered 7 days after it arrived (needs label, ready
 moves to **Admin › Archive**. The database does this every night at 2:00 am, and the app also does it whenever an admin
 or the warehouse desk opens it. Archived orders leave the warehouse desk, the rider's phone and Orders, but nothing is
 deleted: **Restore** puts an order back where it was, with another 7 days. Returned orders are never archived.
+
+## Daily email report
+
+1. Free account at **resend.com** › API Keys › create a key. In Vercel add `RESEND_API_KEY` (and `REPORT_FROM` once your domain
+   is verified in Resend; until then emails only reach the address you signed up to Resend with). Redeploy.
+2. Run `supabase/migrations/007_reattempts_daily_report.sql` in Supabase.
+3. Admin › **Settings**: add the email addresses, pick the time, switch it **On**, Save. **Send a test now** checks it straight away.
+
+The database checks every 15 minutes and the app sends the report once a day after the chosen time. Before noon it covers the
+previous day; from noon it covers the same day so far.
 
 ## Settings
 

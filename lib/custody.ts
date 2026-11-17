@@ -12,3 +12,8 @@ export function pickedAt(p: Parcel): number | undefined {
 export const isReady = (p: Parcel) => p.status === "handed" && pickedAt(p) !== undefined;
 /** Handed to the rider, but he has not scanned it yet. */
 export const isToPick = (p: Parcel) => p.status === "handed" && pickedAt(p) === undefined;
+
+/** Number of failed tries the rider chose to reattempt. */
+export const reattempts = (p: Parcel) => p.attempts?.length ?? 0;
+/** Waiting for the rider to try again (not out on the road right now). */
+export const isReattempt = (p: Parcel) => p.status === "handed" && reattempts(p) > 0;

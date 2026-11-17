@@ -53,6 +53,8 @@ interface Store {
   logCall: (id: string) => void;
   deliver: (id: string, input: { otp: string; distanceM: number; photo?: string; where?: { lat: number; lng: number; acc: number } }) => Result;
   markReturn: (id: string, input: { reason: ReturnReason; distanceM: number; photo?: string; where?: { lat: number; lng: number; acc: number } }) => Result & { flags?: string[] };
+  /** Failed try the rider will try again: proof is kept, the parcel goes back to his list. No limit. */
+  markReattempt: (id: string, input: { reason: ReturnReason; distanceM: number; photo?: string; where?: { lat: number; lng: number; acc: number } }) => Result;
   /** Warehouse records cash it counted. With a rider's QR request, a matching amount is confirmed
    *  at once; otherwise it waits for the rider to accept or dispute it on their phone. */
   deposit: (riderId: string, amount: number, request?: { requestId: string; declared: number }) => Result;
@@ -624,7 +626,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           p.status = "out";
           p.rideStartedAt = Date.now();
           p.manualScan = p.manualScan || manual;
-          p.events.push({ at: Date.now(), what: "Delivery started", by: riderName(s, riderId) });
+          const tries = p.attempts?.length ?? 0;
+          p.events.push({ at: Date.now(), what: tries ? `Delivery started again (attempt ${tries + 1})` : "Delivery started", by: riderName(s, riderId) });
           return p;
         });
         return { ok: true, message: "Delivery started", parcel };
@@ -680,6 +683,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           p.events.push({ at: attempt.at, what: `Marked returned: ${input.reason}`, by: riderName(s, p.riderId), kind: "bad" });
         });
         return { ok: true, message: flags.length ? "Return saved and flagged for review." : "Return saved. Bring the parcel back to the warehouse.", flags };
+      },
+
+      markReattempt: (id, input) => {
+        const p0 = ref.current.parcels.find((x) => x.id === id);
+        if (!p0 || p0.status !== "out") return { ok: false, message: "This ride is not live." };
+        const at = Date.now();
+        const base = { at, reason: input.reason, calls: p0.calls.length, distanceM: input.distanceM, photo: input.photo, manualScan: !!p0.manualScan, where: input.where };
+        const flags = flagsFor({ outcome: "returned", ...base });
+        const n = (p0.attempts?.length ?? 0) + 1;
+        mutate((s) => {
+          const p = s.parcels.find((x) => x.id === id)!;
+          p.attempts = [...(p.attempts ?? []), { outcome: "reattempt", ...base, flags }];
+          p.status = "handed"; // still picked up and with the rider, ready for the next try
+          p.rideStartedAt = undefined;
+          p.calls = [];
+          p.events.push({ at, what: `Attempt ${n} failed: ${input.reason}. Rider will reattempt`, by: riderName(s, p.riderId), kind: "bad" });
+        });
+        return { ok: true, message: `Attempt ${n} saved. The parcel is back in your list as a reattempt.` };
       },
 
       deposit: (riderId, amount, request) => {

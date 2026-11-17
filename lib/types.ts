@@ -37,6 +37,12 @@ export interface Attempt {
   note?: string;
 }
 
+/** A failed delivery try the rider chose to reattempt (kept with its proof). */
+export interface Reattempt extends Omit<Attempt, "outcome"> {
+  outcome: "reattempt";
+  flags: string[];
+}
+
 export type ReviewDecision = "rider" | "customer" | "check";
 
 export interface Review {
@@ -70,6 +76,7 @@ export interface Parcel {
   manualScan?: boolean;
   calls: number[]; // timestamps of calls placed from the app on the live ride
   attempt?: Attempt;
+  attempts?: Reattempt[]; // earlier failed tries the rider reattempted, oldest first
   flags: string[];
   review?: Review;
   events: CustodyEvent[];
