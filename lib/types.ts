@@ -80,7 +80,8 @@ export interface Rider {
   name: string;
   phone: string; // digits only, no +92
   bike: string;
-  licence: string;
+  licence: string; // driving licence number
+  licenceExpiry?: string; // yyyy-mm-dd
 }
 
 export type DepositStatus = "pending" | "confirmed" | "disputed" | "resolved";

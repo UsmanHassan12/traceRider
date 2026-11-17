@@ -5,7 +5,6 @@ import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
 import { Icon } from "@/components/Icon";
 import { isToday, pkr, time } from "@/lib/format";
-import { RULES } from "@/lib/rules";
 import { cashInHand } from "@/lib/store";
 import type { Deposit } from "@/lib/types";
 import { useToast } from "@/components/Toast";
@@ -31,7 +30,6 @@ export default function CashPage() {
   if (!rider) return null;
 
   const cash = cashInHand(state, rider.id);
-  const pct = Math.min(100, Math.round((cash.inHand / RULES.cashLimit) * 100));
   const waiting = state.deposits.filter((d) => d.riderId === rider.id && d.status === "pending").sort((a, b) => b.at - a.at);
   const result = request ? state.deposits.find((d) => d.requestId === request.id) : undefined;
 
@@ -70,15 +68,6 @@ export default function CashPage() {
           <div className="small" style={{ color: "#cfdbee" }}>Cash in hand</div>
           <div className="num" style={{ fontSize: 34, fontWeight: 700, lineHeight: 1.1 }}>{pkr(cash.inHand)}</div>
           {cash.carried > 0 && <div className="xs" style={{ color: "#ffd479", marginTop: 2 }}>Includes {pkr(cash.carried)} not deposited on earlier days</div>}
-        </div>
-        <div className="stack" style={{ gap: 6 }}>
-          <div style={{ height: 8, borderRadius: 4, background: "rgba(255,255,255,.18)", overflow: "hidden" }}>
-            <div style={{ width: `${pct}%`, height: "100%", background: pct > 90 ? "#ff8a80" : "#f2b705", borderRadius: 4 }} />
-          </div>
-          <div className="row between xs" style={{ color: "#cfdbee" }}>
-            <span>{pct}% of your {pkr(RULES.cashLimit)} limit</span>
-            <span>{pkr(Math.max(0, RULES.cashLimit - cash.inHand))} left</span>
-          </div>
         </div>
       </div>
 

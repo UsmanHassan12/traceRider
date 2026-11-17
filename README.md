@@ -97,6 +97,7 @@ when Shopify has one; without it the location check is skipped and noted on the 
 | `supabase/migrations/003_proof_photos.sql` | Private `proof` storage bucket for doorstep photos |
 | `supabase/migrations/004_cash_handover.sql` | Two-sided cash handover: rider's declared amount, one-time QR, accept / dispute |
 | `supabase/migrations/005_archive.sql` | **Archived** status: orders not delivered within 7 days move to Admin › Archive every night |
+| `supabase/migrations/006_licence_expiry.sql` | Driving licence expiry date for each rider (the licence field holds the number) |
 
 Open the file, copy everything inside it, paste into a new query and Run (don't paste the file name).
 
@@ -122,7 +123,7 @@ deleted: **Restore** puts an order back where it was, with another 7 days. Retur
 
 | What | Where |
 | --- | --- |
-| Return rules (calls, distance, photo, block or flag) and cash limit | `lib/rules.ts` |
+| Return rules (calls, distance, photo, block or flag) | `lib/rules.ts` |
 | Require the customer's SMS code on delivery (needs an SMS provider) | `NEXT_PUBLIC_REQUIRE_OTP=true` |
 | Warehouse phone on the rider profile | `NEXT_PUBLIC_DESK_PHONE` |
 | Warehouse location for the rider's delivery order (nearest first, farthest last) | `NEXT_PUBLIC_WAREHOUSE_LAT`, `NEXT_PUBLIC_WAREHOUSE_LNG` |

@@ -11,7 +11,6 @@ export const RULES = {
   /** "block": the rider cannot save a return that fails a check.
    *  "flag": the return is saved but flagged for admin review. */
   mode: "block" as "block" | "flag",
-  cashLimit: 25000,
   /** Ask for the customer's 4-digit code on delivery. Turn on once an SMS provider sends the code
    *  to customers (NEXT_PUBLIC_REQUIRE_OTP=true). While off, a handover photo is required instead. */
   requireOtp: process.env.NEXT_PUBLIC_REQUIRE_OTP === "true",

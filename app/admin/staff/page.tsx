@@ -34,7 +34,7 @@ export default function StaffPage() {
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<Login | null>(null);
-  const [form, setForm] = useState({ name: "", email: "", password: "", role: "rider" as Role, phone: "", bike: "", licence: "", riderId: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "rider" as Role, phone: "", bike: "", licence: "", licenceExpiry: "", riderId: "" });
 
   const refresh = useCallback(async () => {
     const r = await api("GET");
@@ -58,12 +58,12 @@ export default function StaffPage() {
       password: form.password,
       role: form.role,
       riderId: form.role === "rider" && form.riderId ? form.riderId : undefined,
-      rider: form.role === "rider" && !form.riderId ? { phone: form.phone, bike: form.bike, licence: form.licence } : undefined,
+      rider: form.role === "rider" && !form.riderId ? { phone: form.phone, bike: form.bike, licence: form.licence, licenceExpiry: form.licenceExpiry } : undefined,
     });
     setBusy(false);
     if (!r.ok) return toast(r.message ?? "Could not create the login.", "bad");
     toast(`Login created for ${form.name}. Share the email and password with them.`, "good");
-    setForm({ name: "", email: "", password: "", role: form.role, phone: "", bike: "", licence: "", riderId: "" });
+    setForm({ name: "", email: "", password: "", role: form.role, phone: "", bike: "", licence: "", licenceExpiry: "", riderId: "" });
     void refresh();
   }
 
@@ -101,7 +101,14 @@ export default function StaffPage() {
                     <td><b>{l.name || "—"}</b></td>
                     <td className="small">{l.email}</td>
                     <td>{l.role ? <span className={`pill ${l.role === "admin" ? "bad" : l.role === "warehouse" ? "warn" : "info"}`}>{l.role}</span> : <span className="xs muted">No role</span>}</td>
-                    <td className="mono xs">{l.riderId ?? ""}</td>
+                    <td className="xs">
+                      <span className="mono">{l.riderId ?? ""}</span>
+                      {(() => {
+                        const r = state.riders.find((x) => x.id === l.riderId);
+                        const st = r && licenceState(r.licenceExpiry);
+                        return st && st.tone !== "ok" ? <div style={{ color: st.tone === "bad" ? "var(--red)" : "var(--amber-ink)", fontWeight: 600 }}>{st.text}</div> : null;
+                      })()}
+                    </td>
                     <td style={{ textAlign: "right" }}>
                       {l.userId !== me?.userId && (
                         <button type="button" className="btn sm ghost" onClick={() => setRemoving(l)} aria-label={`Remove ${l.email}`}>
@@ -145,7 +152,10 @@ export default function StaffPage() {
                 <>
                   <div className="field"><label htmlFor="f-phone">Mobile number</label><input id="f-phone" className="input" type="tel" value={form.phone} onChange={set("phone")} placeholder="0300 1234567" /></div>
                   <div className="field"><label htmlFor="f-bike">Bike and number plate</label><input id="f-bike" className="input" value={form.bike} onChange={set("bike")} placeholder="Honda CD 70 · ABC-123" /></div>
-                  <div className="field"><label htmlFor="f-lic">Driving licence</label><input id="f-lic" className="input" value={form.licence} onChange={set("licence")} placeholder="Valid till Mar 2028" /></div>
+                  <div className="grid2">
+                    <div className="field"><label htmlFor="f-lic">Driving licence number</label><input id="f-lic" className="input mono" value={form.licence} onChange={set("licence")} placeholder="e.g. 37405-1234567-1" autoComplete="off" /></div>
+                    <div className="field"><label htmlFor="f-lic-exp">Licence expiry date</label><input id="f-lic-exp" className="input" type="date" value={form.licenceExpiry} onChange={set("licenceExpiry")} /></div>
+                  </div>
                 </>
               )}
             </>
@@ -184,4 +194,13 @@ export default function StaffPage() {
       )}
     </main>
   );
+}
+
+/** Licence expiry status: expired, due within 30 days, or fine. */
+function licenceState(expiry?: string): { tone: "ok" | "warn" | "bad"; text: string } | null {
+  if (!expiry) return null;
+  const days = Math.ceil((new Date(`${expiry}T23:59:59`).getTime() - Date.now()) / 864e5);
+  if (days < 0) return { tone: "bad", text: "Licence expired" };
+  if (days <= 30) return { tone: "warn", text: `Licence expires in ${days} day${days === 1 ? "" : "s"}` };
+  return { tone: "ok", text: "" };
 }

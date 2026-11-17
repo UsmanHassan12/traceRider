@@ -10,7 +10,6 @@ import { useToast } from "@/components/Toast";
 import { isReady, isToPick } from "@/lib/custody";
 import { ago, initials, isToday, pkr, time } from "@/lib/format";
 import { routeLink } from "@/lib/route";
-import { RULES } from "@/lib/rules";
 import { cashInHand } from "@/lib/store";
 import type { Parcel } from "@/lib/types";
 import { useRider } from "@/lib/useRider";
@@ -50,7 +49,6 @@ export default function RiderHome() {
   const returned = closed.length - delivered;
   const assigned = ready.length + toPick.length;
   const cash = cashInHand(state, rider.id);
-  const pct = Math.min(100, Math.round((cash.inHand / RULES.cashLimit) * 100));
   const mapLink = routeLink(route.stops);
 
   const groups: { key: Filter; title: string; items: Parcel[]; hint?: string }[] = [
@@ -108,13 +106,11 @@ export default function RiderHome() {
             <div className="num" style={{ fontSize: 24, fontWeight: 700, lineHeight: 1.15 }}>{pkr(cash.inHand)}</div>
           </div>
           <div className="xs muted" style={{ textAlign: "right" }}>
-            Deposit limit<br />
-            <b style={{ color: "var(--ink)" }}>{pkr(RULES.cashLimit)}</b>
+            Collected today<br />
+            <b className="num" style={{ color: "var(--ink)" }}>{pkr(cash.collected)}</b>
           </div>
         </div>
-        <div style={{ height: 8, borderRadius: 4, background: "#eef1f5", overflow: "hidden" }} role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Cash limit used">
-          <div style={{ width: `${pct}%`, height: "100%", background: pct > 90 ? "var(--red)" : "var(--navy)", borderRadius: 4 }} />
-        </div>
+        {cash.carried > 0 && <div className="xs" style={{ color: "var(--amber-ink)" }}>Includes {pkr(cash.carried)} not handed in on earlier days</div>}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", borderTop: "1px solid #eef1f5", paddingTop: 12, textAlign: "center" }}>
           <div><div style={{ fontSize: 20, fontWeight: 700, color: "var(--ink)" }}>{ready.length}</div><div className="xs muted">Ready</div></div>
           <div style={{ borderLeft: "1px solid #eef1f5" }}><div style={{ fontSize: 20, fontWeight: 700, color: "var(--navy)" }}>{out.length}</div><div className="xs muted">On the way</div></div>

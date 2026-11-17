@@ -44,6 +44,7 @@ export interface RiderRow {
   phone: string;
   bike: string;
   licence: string;
+  licence_expiry?: string | null;
   active?: boolean;
   is_sample?: boolean;
 }
@@ -138,7 +139,7 @@ export const fromEvent = (parcelId: string, e: CustodyEvent): EventRow => ({
   kind: e.kind ?? null,
 });
 
-export const toRider = (r: RiderRow): Rider => ({ id: r.id, name: r.name, phone: r.phone, bike: r.bike, licence: r.licence });
+export const toRider = (r: RiderRow): Rider => ({ id: r.id, name: r.name, phone: r.phone, bike: r.bike, licence: r.licence, licenceExpiry: r.licence_expiry ?? undefined });
 
 export const toDeposit = (r: DepositRow): Deposit => ({
   id: r.id,

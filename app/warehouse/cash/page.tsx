@@ -36,7 +36,13 @@ export default function WarehouseCash() {
   const [show, setShow] = useState<Show>("owing");
   const [q, setQ] = useState("");
   const todayKey = ymd(Date.now());
-  const [viewDay, setViewDay] = useState(todayKey);
+  const [viewFrom, setViewFrom] = useState(todayKey);
+  const [viewTo, setViewTo] = useState(todayKey);
+  const live = viewFrom === todayKey && viewTo === todayKey;
+  const setRange = (f: string, t: string) => {
+    setViewFrom(f);
+    setViewTo(t);
+  };
   const input = useRef<HTMLInputElement>(null);
 
   const rows = useMemo(() => {
@@ -95,9 +101,18 @@ export default function WarehouseCash() {
             <div className="small muted">Scan the rider&apos;s cash QR, count the notes, enter the amount. The rider&apos;s phone updates once you mark it received.</div>
           </div>
           <div className="row wrap" style={{ gap: 8 }}>
-            <label htmlFor="cash-day" className="xs muted">Cash on</label>
-            <input id="cash-day" type="date" className="input" value={viewDay} max={todayKey} onChange={(e) => setViewDay(e.target.value || todayKey)} style={{ width: "auto", minHeight: 42 }} />
-            {viewDay !== todayKey && <button type="button" className="btn" onClick={() => setViewDay(todayKey)}>Back to today</button>}
+            <label htmlFor="cash-from" className="xs muted">From</label>
+            <input id="cash-from" type="date" className="input" value={viewFrom} max={viewTo} onChange={(e) => setViewFrom(e.target.value || todayKey)} style={{ width: "auto", minHeight: 42 }} />
+            <label htmlFor="cash-to" className="xs muted">To</label>
+            <input id="cash-to" type="date" className="input" value={viewTo} min={viewFrom} max={todayKey} onChange={(e) => setViewTo(e.target.value || todayKey)} style={{ width: "auto", minHeight: 42 }} />
+            <select aria-label="Quick range" className="input" value="" onChange={(e) => { const n = Number(e.target.value); if (e.target.value === "month") { const d = new Date(); setRange(ymd(new Date(d.getFullYear(), d.getMonth(), 1).getTime()), todayKey); } else if (e.target.value) setRange(ymd(Date.now() - n * 864e5), n === 1 ? ymd(Date.now() - 864e5) : todayKey); }} style={{ width: "auto", minHeight: 42 }}>
+              <option value="">Quick pick…</option>
+              <option value="1">Yesterday</option>
+              <option value="6">Last 7 days</option>
+              <option value="29">Last 30 days</option>
+              <option value="month">This month</option>
+            </select>
+            {!live && <button type="button" className="btn" onClick={() => setRange(todayKey, todayKey)}>Back to today</button>}
           </div>
         </div>
 
@@ -128,7 +143,7 @@ export default function WarehouseCash() {
           </div>
         )}
 
-        {viewDay !== todayKey ? <CashOnDate day={viewDay} /> : <>
+        {!live ? <CashOnDate from={viewFrom} to={viewTo} /> : <>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12 }} className="num">
           <div style={tile}><span className="xs muted">Cash with riders now</span><span style={{ fontSize: 24, fontWeight: 700 }}>{pkr(withRiders)}</span><span className="xs muted">{owingCount} rider{owingCount === 1 ? "" : "s"} to collect from</span></div>
           <div style={tile}><span className="xs muted">Received today</span><span style={{ fontSize: 24, fontWeight: 700, color: "var(--green)" }}>{pkr(receivedToday)}</span><span className="xs muted">{todays.length} handover{todays.length === 1 ? "" : "s"}</span></div>

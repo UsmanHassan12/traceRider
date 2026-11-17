@@ -28,7 +28,7 @@ interface CreateBody {
   role: "admin" | "warehouse" | "rider";
   name: string;
   riderId?: string; // link to an existing rider
-  rider?: { phone?: string; bike?: string; licence?: string }; // create a new rider
+  rider?: { phone?: string; bike?: string; licence?: string; licenceExpiry?: string }; // create a new rider
 }
 
 /** Create a login (and a rider profile for rider logins). */
@@ -50,13 +50,24 @@ export async function POST(req: Request) {
       let n = used.size + 1;
       while (used.has(`R-${String(n).padStart(3, "0")}`)) n++;
       riderId = `R-${String(n).padStart(3, "0")}`;
-      const { error } = await admin.from("riders").insert({
+      const row: Record<string, string> = {
         id: riderId,
         name: body.name.trim(),
         phone: body.rider?.phone ?? "",
         bike: body.rider?.bike ?? "",
-        licence: body.rider?.licence ?? "",
-      });
+        licence: body.rider?.licence?.trim() ?? "",
+      };
+      const expiry = body.rider?.licenceExpiry?.trim();
+      if (expiry) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return bad("Enter the licence expiry as a date.");
+        row.licence_expiry = expiry;
+      }
+      let { error } = await admin.from("riders").insert(row);
+      if (error && /licence_expiry/.test(error.message)) {
+        // database update 006 not run yet: save the rider without the expiry rather than failing
+        delete row.licence_expiry;
+        ({ error } = await admin.from("riders").insert(row));
+      }
       if (error) return bad(error.message, 500);
     }
   }

@@ -9,7 +9,8 @@ create table if not exists public.riders (
   name        text not null,
   phone       text not null default '',
   bike        text not null default '',
-  licence     text not null default '',
+  licence     text not null default '',   -- driving licence number
+  licence_expiry date,                     -- see migration 006
   active      boolean not null default true,
   is_sample   boolean not null default false,
   created_at  timestamptz not null default now()
