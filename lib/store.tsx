@@ -34,6 +34,8 @@ interface Store {
   addTestOrder: () => void;
   printLabel: (id: string) => void;
   printLabels: (ids: string[]) => void;
+  /** Label did not come out: parcel goes back to "Print label". Only before it is assigned. */
+  unprintLabels: (ids: string[]) => Result;
   /** Returns the ids of the parcels that were handed over. */
   handover: (riderId: string, trks: string[]) => string[];
   adminSetOutcome: (id: string, outcome: "delivered" | "returned", reason?: ReturnReason, note?: string) => Result;
@@ -472,6 +474,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           p.status = "labeled";
           p.events.push({ at: Date.now(), what: "Label printed and pasted on box", by: actor() });
         }),
+
+      unprintLabels: (ids) => {
+        const ok = ref.current.parcels.filter((p) => ids.includes(p.id) && p.status === "labeled");
+        if (!ok.length) return { ok: false, message: "Only parcels not yet assigned to a rider can go back to Print label." };
+        mutate((s) => {
+          const at = Date.now();
+          s.parcels.forEach((p) => {
+            if (ids.includes(p.id) && p.status === "labeled") {
+              p.status = "new";
+              p.events.push({ at, what: "Label did not print: moved back to Print label", by: actor(), kind: "bad" });
+            }
+          });
+        });
+        return { ok: true, message: `${ok.length} parcel${ok.length > 1 ? "s" : ""} moved back to Print label.` };
+      },
 
       printLabels: (ids) =>
         mutate((s) => {

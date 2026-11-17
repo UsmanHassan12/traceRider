@@ -24,7 +24,7 @@ const BATCH = 50; // labels per print run
 const PAGE = 12; // rows per page in each column
 
 export default function WarehouseDesk() {
-  const { ready, state, me, addTestOrder, printLabel, printLabels, handover, receiveReturn, takeBack } = useStore();
+  const { ready, state, me, addTestOrder, printLabel, printLabels, unprintLabels, handover, receiveReturn, takeBack } = useStore();
   const toast = useToast();
   const [code, setCode] = useState("");
   const [riderId, setRiderId] = useState<string | null>(null);
@@ -307,6 +307,7 @@ export default function WarehouseDesk() {
                   checked={picked.includes(p.trk)}
                   onCheck={(on) => setPicked((x) => (on ? [...x, p.trk] : x.filter((t) => t !== p.trk)))}
                   onAssign={(to) => assign([p.trk], to)}
+                  onReprint={() => setPrinting([p])}
                 />
               ))}
             </div>
@@ -398,13 +399,29 @@ export default function WarehouseDesk() {
               <div className="scroll-box" style={{ maxHeight: "50vh", display: "flex", flexDirection: "column", gap: 12, alignItems: "center", background: "var(--ground)", borderRadius: 10, padding: 10 }}>
                 {printing.map((p) => <LabelSheet key={p.id} p={p} />)}
               </div>
-              <div className="xs muted">One label per page on a 4 × 6 thermal printer. Paste each on its box.</div>
+              <div className="xs muted">
+                One label per page on a 4 × 6 thermal printer. Press Print, check every label came out clearly, paste each on its box, then confirm.
+                {printing.every((p) => p.status !== "new") && " These labels were printed before: reprinting gives the same code, so the old label still works if it turns up."}
+              </div>
               <div className="row wrap" style={{ justifyContent: "flex-end" }}>
                 <button type="button" className="btn" onClick={() => setPrinting(null)}>Close</button>
-                <button type="button" className="btn" onClick={() => window.print()}><Icon name="printer" size={16} /> Print</button>
+                {printing.some((p) => p.status === "labeled") && (
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={() => {
+                      const r = unprintLabels(printing.map((p) => p.id));
+                      setBanner({ tone: r.ok ? "good" : "bad", title: r.message, sub: r.ok ? "Print them again from the Print label column." : undefined });
+                      setPrinting(null);
+                    }}
+                  >
+                    Not printed? Move back to Print label
+                  </button>
+                )}
+                <button type="button" className="btn" onClick={() => window.print()}><Icon name="printer" size={16} /> {printing.every((p) => p.status !== "new") ? "Reprint" : "Print"}</button>
                 {printing.some((p) => p.status === "new") && (
                   <button type="button" className="btn navy" onClick={() => markPrinted(printing)}>
-                    {printing.length === 1 ? "Label printed and pasted" : `Mark ${printing.length} as printed`}
+                    {printing.length === 1 ? "Printed and pasted" : `All ${printing.length} printed and pasted`}
                   </button>
                 )}
               </div>
@@ -444,13 +461,14 @@ export default function WarehouseDesk() {
 }
 
 /** A printed parcel waiting for a rider: tick box, rider dropdown and Assign. */
-function ReadyRow({ p, riders, defaultRider, checked, onCheck, onAssign }: {
+function ReadyRow({ p, riders, defaultRider, checked, onCheck, onAssign, onReprint }: {
   p: Parcel;
   riders: { id: string; name: string }[];
   defaultRider: string;
   checked: boolean;
   onCheck: (on: boolean) => void;
   onAssign: (riderId: string) => void;
+  onReprint: () => void;
 }) {
   const [to, setTo] = useState(defaultRider);
   useEffect(() => setTo((cur) => cur || defaultRider), [defaultRider]);
@@ -471,6 +489,9 @@ function ReadyRow({ p, riders, defaultRider, checked, onCheck, onAssign }: {
             {riders.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
           <button type="button" className="btn navy sm" disabled={!to} onClick={() => onAssign(to)}>Assign</button>
+          <button type="button" className="icon-btn" aria-label={`Reprint label for ${p.trk}`} title="Reprint label" onClick={onReprint} style={{ width: 34, height: 34, background: "var(--navy-soft)", color: "var(--navy)", flex: "none" }}>
+            <Icon name="printer" size={16} />
+          </button>
         </div>
       </div>
     </div>
