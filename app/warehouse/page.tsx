@@ -324,10 +324,10 @@ export default function WarehouseDesk() {
 
           <section className={`wh-col${thirdCol === "returns" ? " bad" : ""}`} aria-labelledby="col-ret">
             <div className="wh-col-head" role="tablist" aria-label="Returns and reattempts" style={{ gap: 6, justifyContent: "flex-start" }}>
-              <button type="button" role="tab" aria-selected={thirdCol === "returns"} className="chip" aria-pressed={thirdCol === "returns"} onClick={() => setThirdCol("returns")} style={{ fontSize: 13 }}>
+              <button type="button" role="tab" aria-selected={thirdCol === "returns"}  aria-pressed={thirdCol === "returns"} onClick={() => setThirdCol("returns")} style={{ fontSize: 13 }}>
                 <span id="col-ret" style={{ color: "var(--red)", fontWeight: 600 }}>Returns</span> <Count n={returning.length} bad />
               </button>
-              <button type="button" role="tab" aria-selected={thirdCol === "reattempts"} className="chip" aria-pressed={thirdCol === "reattempts"} onClick={() => setThirdCol("reattempts")} style={{ fontSize: 13 }}>
+              <button type="button" role="tab" aria-selected={thirdCol === "reattempts"} aria-pressed={thirdCol === "reattempts"} onClick={() => setThirdCol("reattempts")} style={{ fontSize: 13 }}>
                 <span style={{ color: "var(--amber-ink)", fontWeight: 600 }}>Reattempts</span> <Count n={reattempting.length} />
               </button>
             </div>
