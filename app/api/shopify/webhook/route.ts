@@ -35,6 +35,7 @@ interface ShopifyOrder {
   fulfillment_status?: string | null;
   tags?: string;
   total_price?: string;
+  current_total_price?: string;
   total_outstanding?: string;
   phone?: string;
   customer?: { first_name?: string; last_name?: string; phone?: string };
@@ -44,7 +45,24 @@ interface ShopifyOrder {
 }
 
 const LETTERS = "KPBMTWCRDHQZLSVFJ";
-const skip = (reason: string, id?: string) => NextResponse.json({ ok: true, skipped: reason, id });
+const skip = (reason: string, id?: string) => {
+  // shows in Vercel › Logs, so you can see why an order did not reach the warehouse
+  console.log(`[shopify webhook] ${id ?? "order"} skipped: ${reason}`);
+  return NextResponse.json({ ok: true, skipped: reason, id });
+};
+
+/**
+ * Cash the rider collects. Prepaid orders (Paid, refunded, voided) are 0. Otherwise the balance due;
+ * when Shopify reports no balance on an unpaid order (some admin-created orders), the order total.
+ */
+function codFor(order: ShopifyOrder): number {
+  const status = (order.financial_status ?? "").toLowerCase();
+  if (["paid", "refunded", "voided"].includes(status)) return 0;
+  const outstanding = Number(order.total_outstanding ?? NaN);
+  const total = Number(order.current_total_price ?? order.total_price ?? 0) || 0;
+  if (status === "partially_paid" && outstanding > 0) return outstanding;
+  return outstanding > 0 ? outstanding : total;
+}
 
 export async function POST(req: Request) {
   const raw = await req.text();
@@ -84,25 +102,35 @@ export async function POST(req: Request) {
   const city = matchCity(sa);
   if (!city) return skip(`city "${sa.city ?? ""}" not served`, id);
 
-  // order/updated fires many times; only the first one creates the parcel
-  const { data: already } = await admin.from("parcels").select("id").eq("id", id).maybeSingle();
-  if (already) return skip("already in app", id);
-
   const customerName = sa.name || [order.customer?.first_name, order.customer?.last_name].filter(Boolean).join(" ") || "Customer";
-  const paid = order.financial_status === "paid";
-  const cod = paid ? 0 : Number(order.total_outstanding ?? order.total_price ?? 0) || 0;
+  const cod = codFor(order);
   const lat = typeof sa.latitude === "number" ? sa.latitude : null;
   const lng = typeof sa.longitude === "number" ? sa.longitude : null;
+  const phone = sa.phone || order.phone || order.customer?.phone || "";
+  const address = [sa.address1, sa.address2, sa.city].filter(Boolean).join(", ");
+  const area = sa.address2?.trim() ? `${sa.address2.trim()}, ${city}` : city;
+  const item = (order.line_items ?? []).map((li) => (li.quantity > 1 ? `${li.title} x${li.quantity}` : li.title)).join(", ").slice(0, 240);
+
+  // order/updated fires many times: the first creates the parcel; later ones refresh it while it is
+  // still at the warehouse (amount, address or phone edited in Shopify), never after handover
+  const { data: already } = await admin.from("parcels").select("id,status").eq("id", id).maybeSingle();
+  if (already) {
+    if (already.status !== "new" && already.status !== "labeled") return skip(`already with rider (${already.status})`, id);
+    const { error: upErr } = await admin.from("parcels").update({ customer: customerName, phone, address, area, item, cod, lat, lng }).eq("id", id);
+    if (upErr) return new NextResponse(upErr.message, { status: 500 });
+    console.log(`[shopify webhook] ${id} refreshed from Shopify (COD ${cod})`);
+    return NextResponse.json({ ok: true, refreshed: id, cod });
+  }
 
   const row = {
     id,
     trk: `RT${num}-${LETTERS[crypto.randomInt(LETTERS.length)]}${crypto.randomInt(10)}`,
     shopify_order_id: String(order.id),
     customer: customerName,
-    phone: sa.phone || order.phone || order.customer?.phone || "",
-    address: [sa.address1, sa.address2, sa.city].filter(Boolean).join(", "),
-    area: sa.address2?.trim() ? `${sa.address2.trim()}, ${city}` : city,
-    item: (order.line_items ?? []).map((li) => (li.quantity > 1 ? `${li.title} x${li.quantity}` : li.title)).join(", ").slice(0, 240),
+    phone,
+    address,
+    area,
+    item,
     cod,
     otp: String(crypto.randomInt(1000, 10000)),
     lat,
@@ -117,5 +145,6 @@ export async function POST(req: Request) {
     return new NextResponse(error.message, { status: 500 });
   }
   await admin.from("parcel_events").insert({ parcel_id: id, at: new Date().toISOString(), what: "Confirmed order received from Shopify", by: "Shopify" });
+  console.log(`[shopify webhook] ${id} added (COD ${cod}, ${city})`);
   return NextResponse.json({ ok: true, id });
 }
